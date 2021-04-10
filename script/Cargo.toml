@@ -1,0 +1,16 @@
+[package]
+name = "ballduck_script"
+version = "0.1.0"
+authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
+edition = "2018"
+
+[dependencies]
+
+
+[lib]
+name = "ballscript"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ballscript"
+path = "src/bin.rs"
