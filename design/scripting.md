@@ -12,7 +12,7 @@ hold any number of scripts.
 
 Ballscript resembles a very simplified form of `Python`.
 
-The convention for intendation is to use **tabs**.
+The indentation **must** be tabs. Using spaces will result in an error.
 
 ### Functions
 
@@ -74,13 +74,14 @@ Integers can be defined as
 ```ballscript
 232
 16_777_216
-80u8
-443_i16
+80
+443
 0xdeadbeef
-0b101010101_i32
+0b101010101
 ```
 
-By default, integers are `isize`s, but this can be overriden as shown above
+By default, they use the native platform size (i.e. 64 bit on x86\_64,
+32 bit on x86).
 
 
 ### Floating point numbers
@@ -90,11 +91,14 @@ Floating point numbers can be defined as
 ```ballscript
 23.2
 16_777.216
-80f32
-443_f64
+80
+443
 0xdeadb.eef
-0b10101.0101_f32
+0b10101.0101
 ```
+
+By default, they use the native platform size (i.e. 64 bit on x86\_64,
+32 bit on x86).
 
 
 ### Arrays
