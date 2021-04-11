@@ -1,3 +1,6 @@
+#![feature(option_unwrap_none)]
+#![feature(box_patterns)]
+
 mod ast;
 mod bytecode;
 mod script;
@@ -11,9 +14,7 @@ use tokenizer::TokenStream;
 
 pub fn parse(source: &str) -> Result<Script, ()> {
     let tks = TokenStream::parse(source).unwrap();
-    dbg!(&tks);
     let ast = ast::Script::parse(tks).unwrap();
-    dbg!(&ast);
 
     let locals = {
         let locals = ast.variables;
@@ -40,8 +41,6 @@ pub fn parse(source: &str) -> Result<Script, ()> {
         }
     }
     script.functions.shrink_to_fit();
-
-    dbg!(&script);
 
     Ok(script)
 }

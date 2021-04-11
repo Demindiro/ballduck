@@ -56,6 +56,7 @@ pub enum Token<'src> {
     Space,
     Return,
     Comma,
+    Pass,
 }
 
 #[derive(Debug, PartialEq)]
@@ -188,6 +189,7 @@ impl Token<'_> {
                             "let" => Token::Let,
                             "fn" => Token::Fn,
                             "return" => Token::Return,
+                            "pass" => Token::Pass,
                             _ => Token::Name(s),
                         },
                         i,
@@ -335,6 +337,7 @@ mod test {
             assert_eq!(Token::parse("\n"), Ok((Token::EOL, 1)));
             assert_eq!(Token::parse("\r\n"), Ok((Token::EOL, 2)));
             assert_eq!(Token::parse(","), Ok((Token::Comma, 1)));
+            assert_eq!(Token::parse("pass"), Ok((Token::Pass, 1)));
         }
     }
 

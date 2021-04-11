@@ -21,6 +21,8 @@ pub enum CallError {
     BadArgument,
     BadArgumentCount,
     RunError,
+    /// This is specifically intended for operations on `()` AKA "null"
+    IsEmpty,
 }
 
 pub trait ScriptType: Debug {
@@ -31,9 +33,11 @@ pub trait ScriptType: Debug {
     ) -> Result<Option<Box<dyn ScriptType>>, CallError>;
 }
 
-pub trait ScriptIter {
-    fn iter(&self) -> dyn Iterator<Item = Box<dyn ScriptType>>;
+pub trait ScriptIter: Debug {
+    fn iter(&self) -> ScriptIterator;
 }
+
+pub type ScriptIterator<'a> = Box<dyn Iterator<Item = Box<dyn ScriptType + 'a>> + 'a>;
 
 impl Script {
     pub(crate) fn new(locals: FxHashMap<Box<str>, u16>) -> Self {
@@ -88,6 +92,12 @@ impl ScriptType for Instance<'_> {
     }
 }
 
+impl ScriptType for () {
+    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+        Err(CallError::IsEmpty)
+    }
+}
+
 impl ScriptType for isize {
     fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
@@ -100,8 +110,46 @@ impl ScriptType for f64 {
     }
 }
 
+impl ScriptType for Box<str> {
+    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+        todo!()
+    }
+}
+
+impl ScriptType for char {
+    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+        todo!()
+    }
+}
+
 impl ScriptType for String {
     fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
+    }
+}
+
+impl ScriptIter for isize {
+    fn iter(&self) -> ScriptIterator {
+        if *self < 0 {
+            Box::new(
+                ((-self + 1)..=0)
+                    .rev()
+                    .map(|i| Box::new(i) as Box<dyn ScriptType>),
+            )
+        } else {
+            Box::new((0..*self).map(|i| Box::new(i) as Box<dyn ScriptType>))
+        }
+    }
+}
+
+impl ScriptIter for Box<str> {
+    fn iter(&self) -> ScriptIterator {
+        Box::new(self.chars().map(|c| Box::new(c) as Box<dyn ScriptType>))
+    }
+}
+
+impl ScriptIter for String {
+    fn iter(&self) -> ScriptIterator {
+        Box::new(self.chars().map(|c| Box::new(c) as Box<dyn ScriptType>))
     }
 }

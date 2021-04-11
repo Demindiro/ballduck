@@ -1,4 +1,5 @@
 use crate::tokenizer::*;
+use core::str::FromStr;
 
 type Integer = isize;
 type Real = f64;
@@ -31,6 +32,11 @@ pub(crate) enum Statement<'src> {
     Call {
         func: &'src str,
         args: Vec<Expression<'src>>,
+    },
+    For {
+        var: &'src str,
+        expr: Expression<'src>,
+        lines: Lines<'src>,
     },
 }
 
@@ -71,6 +77,7 @@ pub enum ErrorType {
     UnexpectedEOL,
     UnexpectedSpace,
     Noop,
+    NotANumber,
 }
 
 macro_rules! err {
@@ -134,10 +141,10 @@ impl<'src> Script<'src> {
     }
 }
 
+type TokenGroup<'src> = (Token<'src>, usize, usize);
+
 impl<'src> Function<'src> {
-    fn parse(
-        tokens: &mut impl Iterator<Item = (Token<'src>, usize, usize)>,
-    ) -> Result<Self, Error> {
+    fn parse(tokens: &mut impl Iterator<Item = TokenGroup<'src>>) -> Result<Self, Error> {
         let name = match skip_whitespace(tokens) {
             Some((Token::Name(name), _, _)) => name,
             Some((_, l, c)) => err!(UnexpectedToken, l, c),
@@ -162,27 +169,46 @@ impl<'src> Function<'src> {
             Some((_, l, c)) => err!(UnexpectedToken, l, c),
             None => err!(UnexpectedEOL, 0, 0),
         }
-        let mut tab_count = 0;
-        let (mut tk, mut line, mut column) = loop {
-            match tokens.next() {
-                Some((Token::Tab, _, _)) => tab_count += 1,
-                Some(e) => break e,
-                None => err!(UnexpectedEOL, 0, 0),
-            }
-        };
-        let tab_count = tab_count;
 
+        // Ensure there is one and only one tab
+        let (l, c) = match tokens.next() {
+            Some((Token::Tab, l, c)) => (l, c),
+            Some((e, l, c)) => err!(UnexpectedToken, l, c),
+            None => err!(UnexpectedEOL, 0, 0),
+        };
+
+        Ok(Self {
+            name,
+            parameters,
+            lines: Self::parse_block(tokens, 1, l, c)?.0,
+        })
+    }
+
+    fn parse_block(
+        tokens: &mut impl Iterator<Item = TokenGroup<'src>>,
+        expected_indent: u8,
+        mut line: usize,
+        mut column: usize,
+    ) -> Result<(Lines<'src>, u8), Error> {
         let mut lines = Lines::new();
-        let mut curr_tabs = 0;
         loop {
-            match tk {
-                Token::Space => err!(UnexpectedSpace, line, column),
-                Token::Tab => curr_tabs += 1,
-                Token::EOL => curr_tabs = 0,
-                Token::Name(name) => {
+            match tokens.next() {
+                Some((Token::EOL, ..)) => {
+                    for i in 0..expected_indent {
+                        if let Some((tk, l, c)) = tokens.next() {
+                            if tk == Token::Space {
+                                err!(UnexpectedToken, l, c);
+                            } else if tk != Token::Tab {
+                                return Ok((lines, i));
+                            }
+                        }
+                    }
+                }
+                Some((Token::Tab, l, c)) => err!(UnexpectedToken, l, c),
+                Some((Token::Name(name), ll, lc)) => {
                     let mut args = Vec::new();
                     match skip_whitespace(tokens) {
-                        Some((Token::EOL, ..)) => break,
+                        Some((Token::EOL, ..)) => continue,
                         Some((Token::BracketRoundOpen, l, c)) => match skip_whitespace(tokens) {
                             Some((Token::BracketRoundClose, ..)) => (),
                             Some((pre, ..)) => {
@@ -205,18 +231,61 @@ impl<'src> Function<'src> {
                             dbg!(e);
                             todo!()
                         }
-                        None => err!(UnexpectedEOL, 0, 0),
+                        None => err!(UnexpectedEOL, ll, lc),
                     }
                 }
-                _ => todo!(),
-            }
+                Some((Token::For, mut ll, mut lc)) => {
+                    let var = match skip_whitespace(tokens) {
+                        Some((Token::Name(n), ..)) => n,
+                        Some((_, l, c)) => err!(UnexpectedToken, l, c),
+                        None => err!(UnexpectedEOL, line, column),
+                    };
+                    match skip_whitespace(tokens) {
+                        Some((Token::In, ..)) => (),
+                        Some((_, l, c)) => err!(UnexpectedToken, l, c),
+                        None => err!(UnexpectedEOL, line, column),
+                    }
+                    let (expr, tk) = match skip_whitespace(tokens) {
+                        Some((tk, ..)) => Expression::parse(tk, tokens)?,
+                        None => err!(UnexpectedEOL, line, column),
+                    };
+                    if tk == Token::EOL {
+                        let expected_indent = expected_indent + 1;
+                        'eol: loop {
+                            for i in 0..expected_indent {
+                                match tokens.next() {
+                                    Some((Token::Tab, l, c)) => {
+                                        ll = l;
+                                        lc = c;
+                                    }
+                                    Some((Token::EOL, l, c)) => {
+                                        ll = l;
+                                        lc = c;
+                                        continue 'eol;
+                                    }
+                                    Some((_, l, c)) => err!(UnexpectedToken, l, c),
+                                    None => err!(UnexpectedEOL, ll, lc),
+                                }
+                            }
+                            break;
+                        }
+                        lines.push(Statement::For {
+                            var,
+                            expr,
+                            lines: Self::parse_block(tokens, expected_indent, ll, lc)?.0,
+                        });
+                    } else {
+                        err!(UnexpectedToken, 0, 0);
+                    }
+                }
+                Some((Token::Pass, ..)) => (),
+                Some((tk, ..)) => {
+                    dbg!(tk);
+                    todo!()
+                }
+                None => return Ok((lines, 0)),
+            };
         }
-
-        Ok(Self {
-            name,
-            parameters,
-            lines,
-        })
     }
 }
 
@@ -231,6 +300,17 @@ impl<'src> Expression<'src> {
                 None => err!(UnexpectedEOL, 0, 0),
             },
             Token::String(s) => (Expression::Atom(Atom::String(s)), None),
+            Token::Number(n) => (
+                Expression::Atom(if let Ok(n) = parse_integer(n) {
+                    Atom::Integer(n)
+                } else if let Ok(n) = Real::from_str(n) {
+                    Atom::Real(n)
+                } else {
+                    dbg!(n);
+                    err!(NotANumber, 0, 0);
+                }),
+                None,
+            ),
             e => {
                 dbg!(e);
                 todo!()
@@ -239,7 +319,9 @@ impl<'src> Expression<'src> {
         match skip_whitespace(tokens) {
             Some((Token::BracketRoundClose, ..)) => return Ok((lhs, Token::BracketRoundClose)),
             Some((Token::Comma, ..)) => return Ok((lhs, Token::Comma)),
-            _ => todo!(),
+            Some((Token::EOL, ..)) => return Ok((lhs, Token::EOL)),
+            Some((tk, ..)) => todo!("{:?}", tk),
+            None => todo!("none"),
         }
         /*
         let lhs = match skip_whitespace(tokens) {
@@ -259,5 +341,48 @@ impl Error {
             line,
             column,
         })
+    }
+}
+
+enum NumberParseError {
+    InvalidBase,
+    InvalidDigit,
+    Empty,
+}
+
+/// Custom integer parsing function that allows underscores
+fn parse_integer(s: &str) -> Result<Integer, NumberParseError> {
+    let mut chars = s.chars();
+    let (mut chars, base) = if chars.next() == Some('0') {
+        if let Some(c) = chars.next() {
+            let b = match c {
+                'x' => 16,
+                'b' => 2,
+                'o' => 8,
+                _ => return Err(NumberParseError::InvalidBase),
+            };
+            (chars, b)
+        } else {
+            return Ok(0);
+        }
+    } else {
+        (s.chars(), 10)
+    };
+    if s == "" {
+        Err(NumberParseError::Empty)
+    } else {
+        let mut chars = chars.peekable();
+        let neg = if chars.peek() == Some(&'-') {
+            chars.next();
+            true
+        } else {
+            false
+        };
+        let mut n = 0;
+        for c in chars.filter(|&c| c != '_') {
+            n *= base as Integer;
+            n += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as isize;
+        }
+        Ok(if neg { -n } else { n })
     }
 }
