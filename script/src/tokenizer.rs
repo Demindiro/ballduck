@@ -36,12 +36,12 @@ pub enum Token<'src> {
     Name(&'src str),
     String(&'src str),
     Let,
-	BracketRoundOpen,
-	BracketRoundClose,
-	BracketSquareOpen,
-	BracketSquareClose,
-	BracketCurlyOpen,
-	BracketCurlyClose,
+    BracketRoundOpen,
+    BracketRoundClose,
+    BracketSquareOpen,
+    BracketSquareClose,
+    BracketCurlyOpen,
+    BracketCurlyClose,
     Op(Op),
     Assign(AssignOp),
     If,
@@ -85,115 +85,115 @@ impl Token<'_> {
     fn parse(source: &str) -> Result<(Token, usize), TokenError> {
         let mut chars = source.char_indices().peekable();
         while let Some((start, c)) = chars.next() {
-			return match c {
-				'#' => {
-					while chars.peek() != None && chars.peek().map(|v| v.1) != Some('\n') {
-						chars.next();
-					}
-					continue;
-				}
-				' ' => Ok((Token::Space, start + 1)),
-				'\t' => Ok((Token::Tab, start + 1)),
-				'\n' => Ok((Token::EOL, start + 1)),
-				// windows pls
-				'\r' if chars.peek().map(|v| v.1) == Some('\n') => Ok((Token::EOL, start + 2)),
-				'(' => Ok((Token::BracketRoundOpen, start + 1)),
-				')' => Ok((Token::BracketRoundClose, start + 1)),
-				'[' => Ok((Token::BracketSquareOpen, start + 1)),
-				']' => Ok((Token::BracketSquareClose, start + 1)),
-				'{' => Ok((Token::BracketCurlyOpen, start + 1)),
-				'}' => Ok((Token::BracketCurlyClose, start + 1)),
-				',' => Ok((Token::Comma, start + 1)),
-				'"' => loop {
-					if let Some((i, c)) = chars.next() {
-						if c == '"' {
-							let s = &source[start + 1..i];
-							break Ok((Token::String(s), i + 1));
-						}
-					} else {
-						break Err(TokenError::UnterminatedString);
-					}
-				},
-				_ if Self::OPERATORS.contains(c) => {
-					if let Some((i, n)) = chars.next() {
-						if n == '=' {
-							let i = i + 1;
-							return match c {
-								'+' => Ok((Token::Assign(AssignOp::Add), i)),
-								'-' => Ok((Token::Assign(AssignOp::Sub), i)),
-								'*' => Ok((Token::Assign(AssignOp::Mul), i)),
-								'/' => Ok((Token::Assign(AssignOp::Div), i)),
-								'%' => Ok((Token::Assign(AssignOp::Rem), i)),
-								'&' => Ok((Token::Assign(AssignOp::And), i)),
-								'|' => Ok((Token::Assign(AssignOp::Or), i)),
-								'^' => Ok((Token::Assign(AssignOp::Xor), i)),
-								'=' => Ok((Token::Op(Op::Eq), i)),
-								'!' => Ok((Token::Op(Op::Neq), i)),
-								'<' => Ok((Token::Op(Op::LessEq), i)),
-								'>' => Ok((Token::Op(Op::GreaterEq), i)),
-								_ => Err(TokenError::InvalidAssignOp),
-							};
-						}
-					}
-					let i = start + 1;
-					match c {
-						'+' => Ok((Token::Op(Op::Add), i)),
-						'-' => Ok((Token::Op(Op::Sub), i)),
-						'*' => Ok((Token::Op(Op::Mul), i)),
-						'/' => Ok((Token::Op(Op::Div), i)),
-						'%' => Ok((Token::Op(Op::Rem), i)),
-						'&' => Ok((Token::Op(Op::And), i)),
-						'|' => Ok((Token::Op(Op::Or), i)),
-						'^' => Ok((Token::Op(Op::Xor), i)),
-						'=' => Ok((Token::Assign(AssignOp::None), i)),
-						'<' => Ok((Token::Op(Op::Less), i)),
-						'>' => Ok((Token::Op(Op::Greater), i)),
-						'!' => Ok((Token::Op(Op::Not), i)),
-						_ => unreachable!(),
-					}
-				}
-				_ if c.is_digit(10) => loop {
-					if let Some((i, c)) = chars.next() {
-						if !c.is_alphanumeric() && c != '_' {
-							let s = &source[start..i];
-							break Ok((Token::Number(s), i));
-						}
-					} else {
-						let s = &source[start..];
-						break Ok((Token::Number(s), source.len()));
-					}
-				},
-				_ => {
-					let (s, i) = loop {
-						if let Some((i, c)) = chars.next() {
-							if c.is_whitespace()
-								|| Self::OPERATORS.contains(c)
-								|| Self::BRACKETS.contains(c)
-								|| c == ','
-							{
-								break (&source[start..i], i);
-							}
-						} else {
-							break (&source[start..], source.len());
-						}
-					};
-					Ok((
-						match s {
-							"if" => Token::If,
-							"else" => Token::Else,
-							"elif" => Token::Elif,
-							"while" => Token::While,
-							"for" => Token::For,
-							"in" => Token::In,
-							"let" => Token::Let,
-							"fn" => Token::Fn,
-							"return" => Token::Return,
-							_ => Token::Name(s),
-						},
-						i,
-					))
-				}
-			}
+            return match c {
+                '#' => {
+                    while chars.peek() != None && chars.peek().map(|v| v.1) != Some('\n') {
+                        chars.next();
+                    }
+                    continue;
+                }
+                ' ' => Ok((Token::Space, start + 1)),
+                '\t' => Ok((Token::Tab, start + 1)),
+                '\n' => Ok((Token::EOL, start + 1)),
+                // windows pls
+                '\r' if chars.peek().map(|v| v.1) == Some('\n') => Ok((Token::EOL, start + 2)),
+                '(' => Ok((Token::BracketRoundOpen, start + 1)),
+                ')' => Ok((Token::BracketRoundClose, start + 1)),
+                '[' => Ok((Token::BracketSquareOpen, start + 1)),
+                ']' => Ok((Token::BracketSquareClose, start + 1)),
+                '{' => Ok((Token::BracketCurlyOpen, start + 1)),
+                '}' => Ok((Token::BracketCurlyClose, start + 1)),
+                ',' => Ok((Token::Comma, start + 1)),
+                '"' => loop {
+                    if let Some((i, c)) = chars.next() {
+                        if c == '"' {
+                            let s = &source[start + 1..i];
+                            break Ok((Token::String(s), i + 1));
+                        }
+                    } else {
+                        break Err(TokenError::UnterminatedString);
+                    }
+                },
+                _ if Self::OPERATORS.contains(c) => {
+                    if let Some((i, n)) = chars.next() {
+                        if n == '=' {
+                            let i = i + 1;
+                            return match c {
+                                '+' => Ok((Token::Assign(AssignOp::Add), i)),
+                                '-' => Ok((Token::Assign(AssignOp::Sub), i)),
+                                '*' => Ok((Token::Assign(AssignOp::Mul), i)),
+                                '/' => Ok((Token::Assign(AssignOp::Div), i)),
+                                '%' => Ok((Token::Assign(AssignOp::Rem), i)),
+                                '&' => Ok((Token::Assign(AssignOp::And), i)),
+                                '|' => Ok((Token::Assign(AssignOp::Or), i)),
+                                '^' => Ok((Token::Assign(AssignOp::Xor), i)),
+                                '=' => Ok((Token::Op(Op::Eq), i)),
+                                '!' => Ok((Token::Op(Op::Neq), i)),
+                                '<' => Ok((Token::Op(Op::LessEq), i)),
+                                '>' => Ok((Token::Op(Op::GreaterEq), i)),
+                                _ => Err(TokenError::InvalidAssignOp),
+                            };
+                        }
+                    }
+                    let i = start + 1;
+                    match c {
+                        '+' => Ok((Token::Op(Op::Add), i)),
+                        '-' => Ok((Token::Op(Op::Sub), i)),
+                        '*' => Ok((Token::Op(Op::Mul), i)),
+                        '/' => Ok((Token::Op(Op::Div), i)),
+                        '%' => Ok((Token::Op(Op::Rem), i)),
+                        '&' => Ok((Token::Op(Op::And), i)),
+                        '|' => Ok((Token::Op(Op::Or), i)),
+                        '^' => Ok((Token::Op(Op::Xor), i)),
+                        '=' => Ok((Token::Assign(AssignOp::None), i)),
+                        '<' => Ok((Token::Op(Op::Less), i)),
+                        '>' => Ok((Token::Op(Op::Greater), i)),
+                        '!' => Ok((Token::Op(Op::Not), i)),
+                        _ => unreachable!(),
+                    }
+                }
+                _ if c.is_digit(10) => loop {
+                    if let Some((i, c)) = chars.next() {
+                        if !c.is_alphanumeric() && c != '_' {
+                            let s = &source[start..i];
+                            break Ok((Token::Number(s), i));
+                        }
+                    } else {
+                        let s = &source[start..];
+                        break Ok((Token::Number(s), source.len()));
+                    }
+                },
+                _ => {
+                    let (s, i) = loop {
+                        if let Some((i, c)) = chars.next() {
+                            if c.is_whitespace()
+                                || Self::OPERATORS.contains(c)
+                                || Self::BRACKETS.contains(c)
+                                || c == ','
+                            {
+                                break (&source[start..i], i);
+                            }
+                        } else {
+                            break (&source[start..], source.len());
+                        }
+                    };
+                    Ok((
+                        match s {
+                            "if" => Token::If,
+                            "else" => Token::Else,
+                            "elif" => Token::Elif,
+                            "while" => Token::While,
+                            "for" => Token::For,
+                            "in" => Token::In,
+                            "let" => Token::Let,
+                            "fn" => Token::Fn,
+                            "return" => Token::Return,
+                            _ => Token::Name(s),
+                        },
+                        i,
+                    ))
+                }
+            };
         }
         Err(TokenError::Empty)
     }
@@ -276,30 +276,12 @@ mod test {
 
         #[test]
         fn brackets() {
-            assert_eq!(
-                Token::parse("("),
-                Ok((Token::BracketRoundOpen, 1))
-            );
-            assert_eq!(
-                Token::parse(")"),
-                Ok((Token::BracketRoundClose, 1))
-            );
-            assert_eq!(
-                Token::parse("["),
-                Ok((Token::BracketSquareOpen, 1))
-            );
-            assert_eq!(
-                Token::parse("]"),
-                Ok((Token::BracketSquareClose, 1))
-            );
-            assert_eq!(
-                Token::parse("{"),
-                Ok((Token::BracketCurlyOpen, 1))
-            );
-            assert_eq!(
-                Token::parse("}"),
-                Ok((Token::BracketCurlyClose, 1))
-            );
+            assert_eq!(Token::parse("("), Ok((Token::BracketRoundOpen, 1)));
+            assert_eq!(Token::parse(")"), Ok((Token::BracketRoundClose, 1)));
+            assert_eq!(Token::parse("["), Ok((Token::BracketSquareOpen, 1)));
+            assert_eq!(Token::parse("]"), Ok((Token::BracketSquareClose, 1)));
+            assert_eq!(Token::parse("{"), Ok((Token::BracketCurlyOpen, 1)));
+            assert_eq!(Token::parse("}"), Ok((Token::BracketCurlyClose, 1)));
         }
 
         #[test]

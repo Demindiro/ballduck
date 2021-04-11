@@ -5,7 +5,7 @@ authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
 edition = "2018"
 
 [dependencies]
-
+rustc-hash = "*"
 
 [lib]
 name = "ballscript"
