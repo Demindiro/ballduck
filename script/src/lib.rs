@@ -1,3 +1,4 @@
+#![feature(option_expect_none)]
 #![feature(option_unwrap_none)]
 #![feature(box_patterns)]
 
@@ -14,9 +15,7 @@ use bytecode::ByteCode;
 use tokenizer::TokenStream;
 
 pub fn parse(source: &str) -> Result<Class, ()> {
-    println!("Source:\n---\n{}\n---", source);
     let tks = TokenStream::parse(source).unwrap();
-    dbg!(&tks);
     let ast = ast::Script::parse(tks).unwrap();
 
     let locals = {
@@ -34,9 +33,13 @@ pub fn parse(source: &str) -> Result<Class, ()> {
 
     let mut script = Script::new(locals);
 
+	let mut methods = FxHashMap::with_capacity_and_hasher(ast.functions.len(), Default::default());
+	for f in ast.functions.iter() {
+		methods.insert(f.name, ()).expect_none("Duplicate function");
+	}
     for f in ast.functions {
         let name = f.name.into();
-        match ByteCode::parse(f, &script.locals) {
+        match ByteCode::parse(f, &methods, &script.locals) {
             Ok(f) => {
                 script.functions.insert(name, f);
             }

@@ -60,7 +60,7 @@ pub(crate) enum Expression<'src> {
         right: Box<Expression<'src>>,
     },
     Function {
-		expr: Option<Box<Expression<'src>>>,
+        expr: Option<Box<Expression<'src>>>,
         name: &'src str,
         arguments: Vec<Expression<'src>>,
     },
@@ -184,17 +184,23 @@ impl<'src> Function<'src> {
                     match tokens.next() {
                         Some((Token::BracketRoundOpen, l, c)) => match tokens.next() {
                             Some((Token::BracketRoundClose, ..)) => (),
-                            Some((pre, ..)) => {
+                            Some((mut pre, ..)) => {
                                 loop {
                                     let (expr, last_tk) = Expression::parse(pre, tokens)?;
                                     args.push(expr);
                                     match last_tk {
                                         Some(Token::Comma) => (),
                                         Some(Token::BracketRoundClose) => break,
+                                        None => err!(UnexpectedEOF, 0, 0),
                                         tk => {
                                             panic!("Expression did not parse all tokens: {:?}", tk)
                                         }
                                     }
+                                    pre = if let Some((tk, ..)) = tokens.next() {
+                                        tk
+                                    } else {
+                                        err!(UnexpectedEOF, 0, 0);
+                                    };
                                 }
                                 lines.push(Statement::Call { func: name, args });
                             }
@@ -245,6 +251,7 @@ impl<'src> Function<'src> {
                     }
                 }
                 Some((Token::Indent(0), ..)) | None => return Ok((lines, 0)),
+                Some((Token::Indent(i), ..)) if i < expected_indent => return Ok((lines, 0)),
                 Some((Token::Indent(i), ..)) if i == expected_indent => (),
                 Some((Token::Indent(i), l, c)) => err!(UnexpectedIndent, i, l, c),
                 Some((tk, ..)) => todo!("{:?}", tk),
@@ -293,8 +300,15 @@ impl<'src> Expression<'src> {
                             None => err!(UnexpectedEOF, 0, 0),
                         }
                     }
-					let expr = None;
-                    (Expression::Function { expr, name, arguments }, None)
+                    let expr = None;
+                    (
+                        Expression::Function {
+                            expr,
+                            name,
+                            arguments,
+                        },
+                        None,
+                    )
                 }
                 Some((tk, ..)) => (Expression::Atom(Atom::Name(name)), Some(tk)),
                 e => todo!("{:?}", e),
@@ -305,7 +319,7 @@ impl<'src> Expression<'src> {
             match last_tk {
                 Token::Op(opl) => match tokens.next() {
                     Some((Token::Name(mid), ..)) => {
-						let og_mid = mid;
+                        let og_mid = mid;
                         let mid = Expression::Atom(Atom::Name(mid));
                         match tokens.next() {
                             Some((Token::Op(opr), ..)) => match tokens.next() {
@@ -335,20 +349,21 @@ impl<'src> Expression<'src> {
                                 }
                                 e => todo!("{:?}", e),
                             },
-							Some((Token::BracketRoundOpen, ..)) => {
-								// FIXME handle function args & check for ending brace
-								tokens.next();
-								match opl {
-									Op::Access => {
-										Ok((Expression::Function {
-											expr: Some(Box::new(lhs)),
-											name: og_mid,
-											arguments: Vec::new(),
-										}, Some(Token::BracketRoundClose)))
-									}
-									e => todo!("{:?}", e),
-								}
-							}
+                            Some((Token::BracketRoundOpen, ..)) => {
+                                // FIXME handle function args & check for ending brace
+                                tokens.next();
+                                match opl {
+                                    Op::Access => Ok((
+                                        Expression::Function {
+                                            expr: Some(Box::new(lhs)),
+                                            name: og_mid,
+                                            arguments: Vec::new(),
+                                        },
+                                        Some(Token::BracketRoundClose),
+                                    )),
+                                    e => todo!("{:?}", e),
+                                }
+                            }
                             Some((tk, ..)) if tk == Token::BracketRoundClose => Ok((
                                 Expression::Operation {
                                     left: Box::new(lhs),
@@ -379,8 +394,7 @@ impl<'src> Expression<'src> {
                 }
                 Some((Token::Comma, ..)) => return Ok((lhs, Some(Token::Comma))),
                 Some((Token::Indent(i), ..)) => return Ok((lhs, Some(Token::Indent(i)))),
-                Some((tk, ..)) => todo!("{:?}", tk),
-                None => todo!("none"),
+                e => todo!("{:?}", e),
             }
         }
     }

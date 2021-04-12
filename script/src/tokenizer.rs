@@ -17,7 +17,7 @@ pub enum Op {
     Greater,
     ShiftLeft,
     ShiftRight,
-	Access,
+    Access,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -84,7 +84,7 @@ impl Op {
     fn precedence(&self) -> i8 {
         use Op::*;
         match *self {
-			Access => 12,
+            Access => 12,
             Not => 11,
             Mul | Div | Rem => 10,
             Add | Sub => 9,
@@ -187,12 +187,12 @@ impl Token<'_> {
                         '<' => Ok((Token::Op(Op::Less), i)),
                         '>' => Ok((Token::Op(Op::Greater), i)),
                         '!' => Ok((Token::Op(Op::Not), i)),
-						'.' => Ok((Token::Op(Op::Access), i)),
+                        '.' => Ok((Token::Op(Op::Access), i)),
                         c => unreachable!("operator '{}' not covered", c),
                     }
                 }
                 _ if c.is_digit(10) => {
-					let start = start as usize;
+                    let start = start as usize;
                     let mut dot_encountered = false;
                     let mut prev_was_dot = false;
                     loop {
@@ -216,7 +216,7 @@ impl Token<'_> {
                     }
                 }
                 _ => {
-					let start = start as usize;
+                    let start = start as usize;
                     let (s, i) = loop {
                         if let Some((i, c)) = chars.next() {
                             if c.is_whitespace()
@@ -265,12 +265,12 @@ impl<'src> TokenStream<'src> {
                     let prev_col = if let Token::Indent(i) = tk {
                         line += 1;
                         column = i as u32 + 1;
-						1
+                        1
                     } else {
-						let c = column;
-						column += len;
-						c
-					};
+                        let c = column;
+                        column += len;
+                        c
+                    };
                     tokens.push((tk, line, prev_col));
                     source = &source[len as usize..];
                     start = false;

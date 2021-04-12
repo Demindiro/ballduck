@@ -1,6 +1,17 @@
 fn main()
-	print(length(0.5, 0.7))
+	for _ in 10_000_000
+		#empty()
+		args(0.5, 0.7)
+		#length(0.5, 0.7)
+	#print(length(0.5, 0.7))
+	pass
 
 
 fn length(x, y)
 	return (x * x + y * y).sqrt()
+
+fn empty()
+	pass
+
+fn args(x, y)
+	pass
