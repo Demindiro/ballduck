@@ -3,5 +3,4 @@ fn main()
 
 
 fn length(x, y)
-	#return (x * x + y * y).sqrt()
-	return x * x + y * y
+	return (x * x + y * y).sqrt()

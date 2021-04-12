@@ -4,6 +4,7 @@ use core::fmt::Debug;
 use core::ops::{Add, Mul};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use std::cell::RefCell;
 
 pub struct Class(Arc<Script>);
 
@@ -16,7 +17,20 @@ pub(crate) struct Script {
 #[derive(Debug)]
 pub struct Instance {
     script: Arc<Script>,
-    variables: Box<[Box<dyn ScriptType>]>,
+	// TODO we have 3 options to solve the `A.foo() -> B.bar() -> A.foo()` problem:
+	// * We use `Cell<Box<[_]>>`. This *should* have relatively little overhead but is
+	//   very unintuitive, and the second `A.foo()` call will only see old variable names.
+	//   It is also likely still less efficient than `RefCell` due to an extra alloc.
+	// * We use `RefCell<Box<[_]>>`. This is arguably the most "Rusty" way in terms of
+	//   "don't alias stuff", but is not very intuitive compared to other languages
+	//   and may also end up being impractical.
+	// * We use `Box<[Cell<_>]>`. This will allow mimicking other scripting languages in
+	//   terms of (expected) behaviour but may be less efficient than `RefCell`.
+	// The second and third option should be measured for performance. If the latter is
+	// fast enough (or perhaps even faster) we should use that.
+	// For now, the second option is chosen as the third can't be undone without being a
+	// massive breaking change.
+    variables: RefCell<Box<[Box<dyn ScriptType>]>>,
 }
 
 #[derive(Debug)]
@@ -29,10 +43,11 @@ pub enum CallError {
     IsEmpty,
     InvalidOperator,
     IncompatibleType,
+	AlreadyBorrowed,
 }
 
 pub trait ScriptType: Debug + Any {
-    fn call(&mut self, function: &str, args: &[&dyn ScriptType]) -> CallResult<CallError>;
+    fn call(&self, function: &str, args: &[&dyn ScriptType]) -> CallResult<CallError>;
 
     fn dup(&self) -> Box<dyn ScriptType>;
 
@@ -129,7 +144,7 @@ impl Class {
     pub fn instance(&self) -> Instance {
         Instance {
             script: self.0.clone(),
-            variables: Box::new([]),
+            variables: RefCell::new(Box::new([])),
         }
     }
 }
@@ -141,8 +156,12 @@ impl From<Script> for Class {
 }
 
 impl ScriptType for Instance {
-    fn call(&mut self, function: &str, args: &[&dyn ScriptType]) -> CallResult<CallError> {
-        self.script.call(function, &mut self.variables, args)
+    fn call(&self, function: &str, args: &[&dyn ScriptType]) -> CallResult<CallError> {
+		if let Ok(mut vars) = self.variables.try_borrow_mut() {
+			self.script.call(function, &mut vars, args)
+		} else {
+			Err(CallError::AlreadyBorrowed)
+		}
     }
 
     fn dup(&self) -> Box<dyn ScriptType> {
@@ -155,7 +174,7 @@ impl ScriptType for Instance {
 }
 
 impl ScriptType for () {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+    fn call(&self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         Err(CallError::IsEmpty)
     }
 
@@ -163,7 +182,7 @@ impl ScriptType for () {
 }
 
 impl ScriptType for isize {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+    fn call(&self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
     }
 
@@ -171,8 +190,11 @@ impl ScriptType for isize {
 }
 
 impl ScriptType for f64 {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
-        todo!()
+    fn call(&self, func: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+		Ok(Box::new(match func {
+			"sqrt" => self.sqrt(),
+			_ => return Err(CallError::UndefinedFunction),
+		}))
     }
 
     impl_dup!();
@@ -193,7 +215,7 @@ impl ScriptType for f64 {
 }
 
 impl ScriptType for Box<str> {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+    fn call(&self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
     }
 
@@ -201,7 +223,7 @@ impl ScriptType for Box<str> {
 }
 
 impl ScriptType for char {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+    fn call(&self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
     }
 
@@ -209,7 +231,7 @@ impl ScriptType for char {
 }
 
 impl ScriptType for String {
-    fn call(&mut self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
+    fn call(&self, _: &str, _: &[&dyn ScriptType]) -> CallResult<CallError> {
         todo!()
     }
 

@@ -15,8 +15,7 @@ pub(crate) struct CallArgs {
 
 #[derive(Debug)]
 pub(crate) enum Instruction {
-    // TODO avoid box
-    //Call(Box<(u16, Box<str>)>),
+    Call(Box<(u16, CallArgs)>),
     CallSelf(Box<CallArgs>),
     CallGlobal(Box<CallArgs>),
     //Iter(Box<dyn Iterator<Item = Box<dyn ScriptType>>>),
@@ -168,7 +167,7 @@ impl ByteCode {
                                 }
                                 Atom::Name(a) => todo!("call {:?}", a),
                             },
-                            Expression::Function { name, arguments } => {
+                            Expression::Function { name, arguments, expr } => {
                                 let mut args = Vec::with_capacity(arguments.len());
                                 let store_in = *curr_var_count;
                                 *curr_var_count += 1;
@@ -357,6 +356,42 @@ impl ByteCode {
                 }
                 a => todo!("{:?}", a),
             },
+			Expression::Function { expr, name, arguments } => {
+				let expr = if let Some(e) = expr { e } else { todo!("none expr in fn") };
+				let og_cvc = *curr_var_count;
+				let r = *curr_var_count;
+				*curr_var_count += 1;
+				let e = Self::parse_expression(r, expr, locals, instr, vars, min_var_count, curr_var_count)?;
+				let expr = if let Some(e) = e { e } else { r };
+				let mut args = Vec::with_capacity(arguments.len());
+				for a in arguments {
+					let r = *curr_var_count;
+					*curr_var_count += 1;
+					let e = Self::parse_expression(
+						r,
+						a,
+						locals,
+						instr,
+						vars,
+						min_var_count,
+						curr_var_count,
+					)?;
+					if let Some(e) = e {
+						args.push(e);
+						*curr_var_count -= 1;
+					} else {
+						args.push(r);
+					}
+				}
+				let ca = CallArgs {
+					store_in: Some(store),
+					func: (*name).into(),
+					args: args.into_boxed_slice(),
+				};
+				instr.push(Instruction::Call(Box::new((expr, ca))));
+				*curr_var_count = og_cvc;
+				Ok(None)
+			}
             e => todo!("{:#?}", e),
         }
     }
@@ -387,10 +422,24 @@ impl ByteCode {
             let err_roob = || RunError::RegisterOutOfBounds;
             let err_uf = || RunError::UndefinedFunction;
             let err_env = |e| RunError::EnvironmentError(e);
+            let err_call = |e| RunError::CallError(Box::new(e));
             if let Some(instr) = self.code.get(ip as usize) {
                 ip += 1;
                 use Instruction::*;
                 match instr {
+					Call(box (reg, CallArgs { store_in, func, args })) => {
+                        let r = {
+                            let mut ca = Vec::with_capacity(args.len());
+                            for &a in args.iter() {
+                                ca.push(vars.get(a as usize).ok_or(err_roob())?.as_ref());
+                            }
+							let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
+							obj.call(func, &ca[..]).map_err(err_call)?
+                        };
+                        if let Some(reg) = store_in {
+                            *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
+                        }
+					}
                     CallGlobal(box CallArgs {
                         store_in,
                         func,

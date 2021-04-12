@@ -17,6 +17,7 @@ pub enum Op {
     Greater,
     ShiftLeft,
     ShiftRight,
+	Access,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -57,7 +58,6 @@ pub enum Token<'src> {
     Return,
     Comma,
     Pass,
-    Dot,
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,6 +84,7 @@ impl Op {
     fn precedence(&self) -> i8 {
         use Op::*;
         match *self {
+			Access => 12,
             Not => 11,
             Mul | Div | Rem => 10,
             Add | Sub => 9,
@@ -104,7 +105,7 @@ impl PartialOrd for Op {
 }
 
 impl Token<'_> {
-    const OPERATORS: &'static str = "=+-*/%&|^!<>";
+    const OPERATORS: &'static str = "=+-*/%&|^!<>.";
     const BRACKETS: &'static str = "()[]{}";
 
     fn parse(source: &str, start_of_file: bool) -> Result<(Token, usize), TokenError> {
@@ -141,7 +142,6 @@ impl Token<'_> {
                 '{' => Ok((Token::BracketCurlyOpen, start + 1)),
                 '}' => Ok((Token::BracketCurlyClose, start + 1)),
                 ',' => Ok((Token::Comma, start + 1)),
-                '.' => Ok((Token::Dot, start + 1)),
                 '"' => loop {
                     if let Some((i, c)) = chars.next() {
                         if c == '"' {
@@ -187,7 +187,8 @@ impl Token<'_> {
                         '<' => Ok((Token::Op(Op::Less), i)),
                         '>' => Ok((Token::Op(Op::Greater), i)),
                         '!' => Ok((Token::Op(Op::Not), i)),
-                        _ => unreachable!(),
+						'.' => Ok((Token::Op(Op::Access), i)),
+                        c => unreachable!("operator '{}' not covered", c),
                     }
                 }
                 _ if c.is_digit(10) => {
