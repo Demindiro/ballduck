@@ -4,8 +4,8 @@ use core::fmt::Debug;
 use core::ops::{Add, Mul};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct Class(Arc<Script>);
 

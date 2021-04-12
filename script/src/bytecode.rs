@@ -3,18 +3,17 @@ use crate::script::CallError;
 use crate::tokenizer::Op;
 use crate::{ScriptIter, ScriptType};
 use core::convert::TryInto;
+use core::fmt::{self, Debug, Formatter};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
-#[derive(Debug)]
 pub(crate) struct CallArgs {
     store_in: Option<u16>,
     func: Box<str>,
     args: Box<[u16]>,
 }
 
-#[derive(Debug)]
 pub(crate) enum Instruction {
     Call(Box<(u16, CallArgs)>),
     CallSelf(Box<CallArgs>),
@@ -22,36 +21,32 @@ pub(crate) enum Instruction {
     //Iter(Box<dyn Iterator<Item = Rc<dyn ScriptType>>>),
     //Jmp(u32),
     //JmpIf(u16, u32),
-
     RetSome,
     RetNone,
 
     IterConst(Box<(u16, u32, Box<dyn ScriptIter>)>),
     IterJmp(u16, u32),
 
-	/*
+    /*
     AndJmp(u16, u16, u32),
     OrJmp(u16, u16, u32),
     Xor(u16, u16, u32),
     Eq,
     Neq,
-	*/
-
+    */
     Add(u16, u16, u16),
     //Sub(u16, u16, u16),
     Mul(u16, u16, u16),
     //Div(u16, u16, u16),
     //Rem(u16, u16, u16),
-
     Move(u16, u16),
-
-/*
+    /*
     AddConst,
     SubConst,
     MulConst,
     DivConst,
     RemConst,
-	*/
+    */
 }
 
 #[derive(Debug)]
@@ -66,7 +61,7 @@ pub(crate) struct ByteCode {
     code: Vec<Instruction>,
     param_count: u16,
     var_count: u16,
-	consts: Vec<Rc<dyn ScriptType>>,
+    consts: Vec<Rc<dyn ScriptType>>,
 }
 
 #[derive(Debug)]
@@ -97,12 +92,12 @@ pub enum EnvironmentError {
 impl ByteCode {
     pub(crate) fn parse(
         function: Function,
-		methods: &FxHashMap<&str, ()>,
+        methods: &FxHashMap<&str, ()>,
         locals: &FxHashMap<Box<str>, u16>,
     ) -> Result<Self, ByteCodeError> {
         let mut instr = Vec::new();
         let mut vars = FxHashMap::with_hasher(Default::default());
-		let mut consts = Vec::new();
+        let mut consts = Vec::new();
         let param_count = function.parameters.len() as u16;
         for p in function.parameters {
             if vars.insert(p, vars.len() as u16).is_some() {
@@ -112,11 +107,11 @@ impl ByteCode {
         let mut var_count = vars.len() as u16;
         let vars = Self::parse_block(
             &function.lines,
-			methods,
+            methods,
             locals,
             &mut instr,
             &mut vars,
-			&mut consts,
+            &mut consts,
             &mut var_count,
             0,
         )?;
@@ -125,43 +120,47 @@ impl ByteCode {
             _ => instr.push(Instruction::RetNone),
         }
 
-		if consts.len() > 0 {
-			// All consts are using the upper-most registers, move them downwards
-			let offset = (u16::MAX - consts.len() as u16).wrapping_add(1);
-			for i in instr.iter_mut() {
-				use Instruction::*;
-				let conv = |c: &mut u16| if *c >= offset { *c = u16::MAX - *c + vars };
-				match i {
-					Call(box (_, ca)) | CallSelf(box ca) | CallGlobal(box ca) => {
-						for a in ca.args.iter_mut() {
-							conv(a);
-						}
-					}
-					Move(_, a) => conv(a),
-					Add(_, a, b) | Mul(_, a, b) => {
-						conv(a);
-						conv(b);
-					}
-					IterConst(_) | IterJmp(_, _) | RetSome | RetNone => (),
-				}
-			}
-		}
+        if consts.len() > 0 {
+            // All consts are using the upper-most registers, move them downwards
+            let offset = (u16::MAX - consts.len() as u16).wrapping_add(1);
+            for i in instr.iter_mut() {
+                use Instruction::*;
+                let conv = |c: &mut u16| {
+                    if *c >= offset {
+                        *c = u16::MAX - *c + vars
+                    }
+                };
+                match i {
+                    Call(box (_, ca)) | CallSelf(box ca) | CallGlobal(box ca) => {
+                        for a in ca.args.iter_mut() {
+                            conv(a);
+                        }
+                    }
+                    Move(_, a) => conv(a),
+                    Add(_, a, b) | Mul(_, a, b) => {
+                        conv(a);
+                        conv(b);
+                    }
+                    IterConst(_) | IterJmp(_, _) | RetSome | RetNone => (),
+                }
+            }
+        }
 
         Ok(Self {
             code: instr,
             var_count: vars,
             param_count,
-			consts,
+            consts,
         })
     }
 
     fn parse_block<'a>(
         lines: &Lines<'a>,
-		methods: &FxHashMap<&str, ()>,
+        methods: &FxHashMap<&str, ()>,
         locals: &FxHashMap<Box<str>, u16>,
         instr: &mut Vec<Instruction>,
         vars: &mut FxHashMap<&'a str, u16>,
-		consts: &mut Vec<Rc<dyn ScriptType>>,
+        consts: &mut Vec<Rc<dyn ScriptType>>,
         curr_var_count: &mut u16,
         mut min_var_count: u16,
     ) -> Result<u16, ByteCodeError> {
@@ -176,13 +175,15 @@ impl ByteCode {
                     let mut args = Vec::with_capacity(arguments.len());
                     // TODO move this to `parse_expression`
                     for a in arguments {
-						let mut add_const = |v| {
-							consts.push(v);
-							u16::MAX - consts.len() as u16 + 1
-						};
+                        let mut add_const = |v| {
+                            consts.push(v);
+                            u16::MAX - consts.len() as u16 + 1
+                        };
                         args.push(match a {
                             Expression::Atom(a) => match a {
-                                Atom::String(a) => add_const(Rc::new(a.to_string().into_boxed_str())),
+                                Atom::String(a) => {
+                                    add_const(Rc::new(a.to_string().into_boxed_str()))
+                                }
                                 Atom::Integer(a) => add_const(Rc::new(*a)),
                                 Atom::Real(a) => add_const(Rc::new(*a)),
                                 Atom::Name(a) => todo!("call {:?}", a),
@@ -200,9 +201,11 @@ impl ByteCode {
                                     match a {
                                         Expression::Atom(a) => {
                                             args.push(match a {
-												Atom::String(a) => add_const(Rc::new(a.to_string().into_boxed_str())),
-												Atom::Integer(a) => add_const(Rc::new(*a)),
-												Atom::Real(a) => add_const(Rc::new(*a)),
+                                                Atom::String(a) => add_const(Rc::new(
+                                                    a.to_string().into_boxed_str(),
+                                                )),
+                                                Atom::Integer(a) => add_const(Rc::new(*a)),
+                                                Atom::Real(a) => add_const(Rc::new(*a)),
                                                 Atom::Name(a) => todo!("call {:?}", a),
                                             });
                                         }
@@ -229,11 +232,11 @@ impl ByteCode {
                         func: (*func).into(),
                         args: args.into_boxed_slice(),
                     });
-					instr.push(if methods.contains_key(func) {
-						Instruction::CallSelf(args)
-					} else {
-						Instruction::CallGlobal(args)
-					});
+                    instr.push(if methods.contains_key(func) {
+                        Instruction::CallSelf(args)
+                    } else {
+                        Instruction::CallGlobal(args)
+                    });
                 }
                 Statement::For { var, expr, lines } => {
                     let reg = vars.len().try_into().expect("Too many variables");
@@ -261,11 +264,11 @@ impl ByteCode {
                     let ip = instr.len() as u32;
                     min_var_count = Self::parse_block(
                         lines,
-						methods,
+                        methods,
                         locals,
                         instr,
                         vars,
-						consts,
+                        consts,
                         curr_var_count,
                         min_var_count,
                     )?;
@@ -440,10 +443,10 @@ impl ByteCode {
         vars.resize_with(self.var_count as usize, || {
             Rc::new(()) as Rc<dyn ScriptType>
         });
-		vars.extend(self.consts.iter().cloned());
+        vars.extend(self.consts.iter().cloned());
         let mut ip = 0;
         let mut iterators = Vec::new();
-		let mut call_args = Vec::new();
+        let mut call_args = Vec::new();
         loop {
             let err_roob = || RunError::RegisterOutOfBounds;
             let err_uf = || RunError::UndefinedFunction;
@@ -461,12 +464,12 @@ impl ByteCode {
                             args,
                         },
                     )) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
-						}
-						let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
-						let r = obj.call(func, &call_args[..]).map_err(err_call)?;
-						call_args.clear();
+                        for &a in args.iter() {
+                            call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+                        }
+                        let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
+                        let r = obj.call(func, &call_args[..]).map_err(err_call)?;
+                        call_args.clear();
                         if let Some(reg) = store_in {
                             *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
                         }
@@ -476,11 +479,11 @@ impl ByteCode {
                         func,
                         args,
                     }) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
-						}
-						let r = env.call(func, &call_args[..]).map_err(err_env)?;
-						call_args.clear();
+                        for &a in args.iter() {
+                            call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+                        }
+                        let r = env.call(func, &call_args[..]).map_err(err_env)?;
+                        call_args.clear();
                         if let Some(reg) = store_in {
                             *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
                         }
@@ -490,18 +493,20 @@ impl ByteCode {
                         func,
                         args,
                     }) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
-						}
-						let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
-						let r = r.run(functions, locals, &call_args[..], env)?;
-						call_args.clear();
-						// SAFETY: ditto
+                        for &a in args.iter() {
+                            call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+                        }
+                        let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
+                        let r = r.run(functions, locals, &call_args[..], env)?;
+                        call_args.clear();
+                        // SAFETY: ditto
                         if let Some(reg) = store_in {
                             *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
                         }
                     }
-                    RetSome => break Ok(vars.first().ok_or(RunError::RegisterOutOfBounds)?.clone()),
+                    RetSome => {
+                        break Ok(vars.first().ok_or(RunError::RegisterOutOfBounds)?.clone())
+                    }
                     RetNone => break Ok(Rc::new(())),
                     IterConst(box (reg, jmp_ip, iter)) => {
                         let mut iter = iter.iter();
@@ -542,11 +547,11 @@ impl ByteCode {
                             .get_mut(*r as usize)
                             .ok_or(RunError::RegisterOutOfBounds)? = e;
                     }
-					/*
+                    /*
                     DupConst(r, c) => {
                         *vars.get_mut(*r as usize).ok_or(err_roob())? = c.clone();
                     }
-					*/
+                    */
                     _ => todo!("{:?}", instr),
                 }
             } else {
@@ -583,5 +588,34 @@ impl Environment {
             .get(func)
             .ok_or(EnvironmentError::UndefinedFunction)?(args)
         .unwrap())
+    }
+}
+
+/// This returns each instruction on oneline instead of 5+ with the default Debug
+impl Debug for Instruction {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use Instruction::*;
+        match self {
+            Call(box (r, a)) => write!(f, "call    {}, {:?}", r, a),
+            CallSelf(a) => write!(f, "call    self, {:?}", a),
+            CallGlobal(a) => write!(f, "call    env, {:?}", a),
+            Move(a, b) => write!(f, "move    {:?}, {:?}", a, b),
+            RetSome => write!(f, "ret     0"),
+            RetNone => write!(f, "ret     none"),
+            IterConst(box (r, p, i)) => write!(f, "iter    {}, {}, {:?}", r, p, i),
+            IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
+            Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
+            Mul(r, a, b) => write!(f, "mul     {}, {}, {}", r, a, b),
+        }
+    }
+}
+
+impl Debug for CallArgs {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		if let Some(n) = self.store_in {
+			write!(f, "{}, \"{}\", {:?}", n, self.func, self.args)
+		} else {
+			write!(f, "none, \"{}\", {:?}", self.func, self.args)
+		}
     }
 }

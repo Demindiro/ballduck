@@ -1,8 +1,8 @@
 fn main()
-	#for _ in 10_000_000
+	for _ in 10_000_000
 		#empty()
 		#args(1, 2)
-		#length(0.5, 0.7)
+		length(0.5, 0.7)
 	print(length(0.5, 0.7))
 	pass
 

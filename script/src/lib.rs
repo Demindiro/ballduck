@@ -33,10 +33,10 @@ pub fn parse(source: &str) -> Result<Class, ()> {
 
     let mut script = Script::new(locals);
 
-	let mut methods = FxHashMap::with_capacity_and_hasher(ast.functions.len(), Default::default());
-	for f in ast.functions.iter() {
-		methods.insert(f.name, ()).expect_none("Duplicate function");
-	}
+    let mut methods = FxHashMap::with_capacity_and_hasher(ast.functions.len(), Default::default());
+    for f in ast.functions.iter() {
+        methods.insert(f.name, ()).expect_none("Duplicate function");
+    }
     for f in ast.functions {
         let name = f.name.into();
         match ByteCode::parse(f, &methods, &script.locals) {
