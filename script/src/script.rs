@@ -126,7 +126,7 @@ impl Script {
         let mut env = Environment::new();
         env.add_function(
             "print".into(),
-            Box::new(|a: &[&_]| {
+            Box::new(|a: &[_]| {
                 a.iter().for_each(|a| println!("{:?}", a));
                 Ok(Rc::new(()))
             }),

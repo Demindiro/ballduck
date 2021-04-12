@@ -20,36 +20,38 @@ pub(crate) enum Instruction {
     CallSelf(Box<CallArgs>),
     CallGlobal(Box<CallArgs>),
     //Iter(Box<dyn Iterator<Item = Rc<dyn ScriptType>>>),
-    Jmp(u32),
-    JmpIf(u16, u32),
+    //Jmp(u32),
+    //JmpIf(u16, u32),
 
     RetSome,
     RetNone,
 
-    // TODO avoid box
     IterConst(Box<(u16, u32, Box<dyn ScriptIter>)>),
     IterJmp(u16, u32),
 
+	/*
     AndJmp(u16, u16, u32),
     OrJmp(u16, u16, u32),
     Xor(u16, u16, u32),
     Eq,
     Neq,
+	*/
 
     Add(u16, u16, u16),
-    Sub(u16, u16, u16),
+    //Sub(u16, u16, u16),
     Mul(u16, u16, u16),
-    Div(u16, u16, u16),
-    Rem(u16, u16, u16),
+    //Div(u16, u16, u16),
+    //Rem(u16, u16, u16),
 
     Move(u16, u16),
-    DupConst(u16, Rc<dyn ScriptType>),
 
+/*
     AddConst,
     SubConst,
     MulConst,
     DivConst,
     RemConst,
+	*/
 }
 
 #[derive(Debug)]
@@ -64,6 +66,7 @@ pub(crate) struct ByteCode {
     code: Vec<Instruction>,
     param_count: u16,
     var_count: u16,
+	consts: Vec<Rc<dyn ScriptType>>,
 }
 
 #[derive(Debug)]
@@ -81,7 +84,7 @@ pub struct Environment {
     functions: FxHashMap<Box<str>, EnvironmentFunction>,
 }
 
-pub type EnvironmentFunction = Box<dyn Fn(&[&dyn ScriptType]) -> CallResult<RunError>>;
+pub type EnvironmentFunction = Box<dyn Fn(&[Rc<dyn ScriptType>]) -> CallResult<RunError>>;
 pub type CallResult<E> = Result<Rc<dyn ScriptType>, E>;
 
 #[derive(Debug)]
@@ -99,6 +102,7 @@ impl ByteCode {
     ) -> Result<Self, ByteCodeError> {
         let mut instr = Vec::new();
         let mut vars = FxHashMap::with_hasher(Default::default());
+		let mut consts = Vec::new();
         let param_count = function.parameters.len() as u16;
         for p in function.parameters {
             if vars.insert(p, vars.len() as u16).is_some() {
@@ -112,6 +116,7 @@ impl ByteCode {
             locals,
             &mut instr,
             &mut vars,
+			&mut consts,
             &mut var_count,
             0,
         )?;
@@ -119,10 +124,34 @@ impl ByteCode {
             Some(Instruction::RetSome) | Some(Instruction::RetNone) => (),
             _ => instr.push(Instruction::RetNone),
         }
+
+		if consts.len() > 0 {
+			// All consts are using the upper-most registers, move them downwards
+			let offset = (u16::MAX - consts.len() as u16).wrapping_add(1);
+			for i in instr.iter_mut() {
+				use Instruction::*;
+				let conv = |c: &mut u16| if *c >= offset { *c = u16::MAX - *c + vars };
+				match i {
+					Call(box (_, ca)) | CallSelf(box ca) | CallGlobal(box ca) => {
+						for a in ca.args.iter_mut() {
+							conv(a);
+						}
+					}
+					Move(_, a) => conv(a),
+					Add(_, a, b) | Mul(_, a, b) => {
+						conv(a);
+						conv(b);
+					}
+					IterConst(_) | IterJmp(_, _) | RetSome | RetNone => (),
+				}
+			}
+		}
+
         Ok(Self {
             code: instr,
             var_count: vars,
             param_count,
+			consts,
         })
     }
 
@@ -132,6 +161,7 @@ impl ByteCode {
         locals: &FxHashMap<Box<str>, u16>,
         instr: &mut Vec<Instruction>,
         vars: &mut FxHashMap<&'a str, u16>,
+		consts: &mut Vec<Rc<dyn ScriptType>>,
         curr_var_count: &mut u16,
         mut min_var_count: u16,
     ) -> Result<u16, ByteCodeError> {
@@ -146,29 +176,15 @@ impl ByteCode {
                     let mut args = Vec::with_capacity(arguments.len());
                     // TODO move this to `parse_expression`
                     for a in arguments {
+						let mut add_const = |v| {
+							consts.push(v);
+							u16::MAX - consts.len() as u16 + 1
+						};
                         args.push(match a {
                             Expression::Atom(a) => match a {
-                                Atom::String(a) => {
-                                    let v = Rc::new(a.to_string().into_boxed_str());
-                                    let v = Instruction::DupConst(*curr_var_count, v);
-                                    instr.push(v);
-                                    *curr_var_count += 1;
-                                    *curr_var_count - 1
-                                }
-                                Atom::Integer(a) => {
-                                    let v = Rc::new(*a);
-                                    let v = Instruction::DupConst(*curr_var_count, v);
-                                    instr.push(v);
-                                    *curr_var_count += 1;
-                                    *curr_var_count - 1
-                                }
-                                Atom::Real(a) => {
-                                    let v = Rc::new(*a);
-                                    let v = Instruction::DupConst(*curr_var_count, v);
-                                    instr.push(v);
-                                    *curr_var_count += 1;
-                                    *curr_var_count - 1
-                                }
+                                Atom::String(a) => add_const(Rc::new(a.to_string().into_boxed_str())),
+                                Atom::Integer(a) => add_const(Rc::new(*a)),
+                                Atom::Real(a) => add_const(Rc::new(*a)),
                                 Atom::Name(a) => todo!("call {:?}", a),
                             },
                             Expression::Function {
@@ -184,31 +200,9 @@ impl ByteCode {
                                     match a {
                                         Expression::Atom(a) => {
                                             args.push(match a {
-                                                Atom::String(a) => {
-                                                    let v =
-                                                        Rc::new(a.to_string().into_boxed_str());
-                                                    let v =
-                                                        Instruction::DupConst(*curr_var_count, v);
-                                                    instr.push(v);
-                                                    *curr_var_count += 1;
-                                                    *curr_var_count - 1
-                                                }
-                                                Atom::Integer(a) => {
-                                                    let v = Rc::new(*a);
-                                                    let v =
-                                                        Instruction::DupConst(*curr_var_count, v);
-                                                    instr.push(v);
-                                                    *curr_var_count += 1;
-                                                    *curr_var_count - 1
-                                                }
-                                                Atom::Real(a) => {
-                                                    let v = Rc::new(*a);
-                                                    let v =
-                                                        Instruction::DupConst(*curr_var_count, v);
-                                                    instr.push(v);
-                                                    *curr_var_count += 1;
-                                                    *curr_var_count - 1
-                                                }
+												Atom::String(a) => add_const(Rc::new(a.to_string().into_boxed_str())),
+												Atom::Integer(a) => add_const(Rc::new(*a)),
+												Atom::Real(a) => add_const(Rc::new(*a)),
                                                 Atom::Name(a) => todo!("call {:?}", a),
                                             });
                                         }
@@ -271,6 +265,7 @@ impl ByteCode {
                         locals,
                         instr,
                         vars,
+						consts,
                         curr_var_count,
                         min_var_count,
                     )?;
@@ -438,13 +433,14 @@ impl ByteCode {
         if args.len() != self.param_count as usize {
             return Err(RunError::IncorrectArgumentCount);
         }
-        let mut vars = Vec::with_capacity(self.var_count as usize);
+        let mut vars = Vec::with_capacity(self.var_count as usize + self.consts.len());
         for a in args.iter() {
             vars.push(a.clone());
         }
         vars.resize_with(self.var_count as usize, || {
             Rc::new(()) as Rc<dyn ScriptType>
         });
+		vars.extend(self.consts.iter().cloned());
         let mut ip = 0;
         let mut iterators = Vec::new();
 		let mut call_args = Vec::new();
@@ -457,7 +453,6 @@ impl ByteCode {
                 ip += 1;
                 use Instruction::*;
                 match instr {
-					/*
                     Call(box (
                         reg,
                         CallArgs {
@@ -466,20 +461,12 @@ impl ByteCode {
                             args,
                         },
                     )) => {
-                        let r = {
-                            let mut ca = Vec::with_capacity(args.len());
-                            for &a in args.iter() {
-                                ca.push(vars.get(a as usize).ok_or(err_roob())?.as_ref());
-                            }
-                            let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
-                            obj.call(func, &ca[..]).map_err(err_call)?
-                        };
-						// SAFETY: call_args has been cleared and thus does no longer actually
-						// borrow any of the value in vars. However, Rust doesn't realize this, so
-						// transmuting the lifetime is the only solution.
-						// **NOTE**: an alternative solution would be to reallocate a new Vec.
-						// This has far too much overhead however, so it's not an option.
-						call_args = unsafe { mem::transmute(call_args) };
+						for &a in args.iter() {
+							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+						}
+						let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
+						let r = obj.call(func, &call_args[..]).map_err(err_call)?;
+						call_args.clear();
                         if let Some(reg) = store_in {
                             *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
                         }
@@ -489,20 +476,15 @@ impl ByteCode {
                         func,
                         args,
                     }) => {
-                        let r = {
-                            let mut ca = Vec::with_capacity(args.len());
-                            for &a in args.iter() {
-                                ca.push(vars.get(a as usize).ok_or(err_roob())?.as_ref());
-                            }
-                            env.call(func, &ca[..]).map_err(err_env)?
-                        };
-						// SAFETY: ditto
-						call_args = unsafe { mem::transmute(call_args) };
+						for &a in args.iter() {
+							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+						}
+						let r = env.call(func, &call_args[..]).map_err(err_env)?;
+						call_args.clear();
                         if let Some(reg) = store_in {
                             *vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
                         }
                     }
-					*/
                     CallSelf(box CallArgs {
                         store_in,
                         func,
@@ -555,14 +537,16 @@ impl ByteCode {
                     Add(r, a, b) => {
                         let a = vars.get(*a as usize).ok_or(RunError::RegisterOutOfBounds)?;
                         let b = vars.get(*b as usize).ok_or(RunError::RegisterOutOfBounds)?;
-                        let e = a.mul(b).map_err(|e| RunError::CallError(Box::new(e)))?;
+                        let e = a.add(b).map_err(|e| RunError::CallError(Box::new(e)))?;
                         *vars
                             .get_mut(*r as usize)
                             .ok_or(RunError::RegisterOutOfBounds)? = e;
                     }
+					/*
                     DupConst(r, c) => {
                         *vars.get_mut(*r as usize).ok_or(err_roob())? = c.clone();
                     }
+					*/
                     _ => todo!("{:?}", instr),
                 }
             } else {
@@ -593,7 +577,7 @@ impl Environment {
         }
     }
 
-    pub fn call(&self, func: &str, args: &[&dyn ScriptType]) -> CallResult<EnvironmentError> {
+    pub fn call(&self, func: &str, args: &[Rc<dyn ScriptType>]) -> CallResult<EnvironmentError> {
         Ok(self
             .functions
             .get(func)
