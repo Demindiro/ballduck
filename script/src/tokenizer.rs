@@ -15,6 +15,8 @@ pub enum Op {
     GreaterEq,
     Less,
     Greater,
+	ShiftLeft,
+	ShiftRight,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -57,6 +59,7 @@ pub enum Token<'src> {
     Return,
     Comma,
     Pass,
+	Dot,
 }
 
 #[derive(Debug, PartialEq)]
@@ -77,6 +80,29 @@ pub enum TokenStreamError {
     UnterminatedString,
     InvalidOp,
     InvalidAssignOp,
+}
+
+impl Op {
+	fn precedence(&self) -> i8 {
+		use Op::*;
+		match *self {
+			Not => 11,
+			Mul | Div | Rem => 10,
+			Add | Sub => 9,
+			ShiftRight | ShiftLeft => 8,
+			And => 7,
+			Xor => 6,
+			Or => 5,
+			Less | Greater | LessEq | GreaterEq => 4,
+			Eq | Neq => 3,
+		}
+	}
+}
+
+impl PartialOrd for Op {
+	fn partial_cmp(&self, rhs: &Self) -> Option<core::cmp::Ordering> {
+		self.precedence().partial_cmp(&rhs.precedence())
+	}
 }
 
 impl Token<'_> {
@@ -105,6 +131,7 @@ impl Token<'_> {
                 '{' => Ok((Token::BracketCurlyOpen, start + 1)),
                 '}' => Ok((Token::BracketCurlyClose, start + 1)),
                 ',' => Ok((Token::Comma, start + 1)),
+				'.' => Ok((Token::Dot, start + 1)),
                 '"' => loop {
                     if let Some((i, c)) = chars.next() {
                         if c == '"' {
@@ -153,16 +180,28 @@ impl Token<'_> {
                         _ => unreachable!(),
                     }
                 }
-                _ if c.is_digit(10) => loop {
-                    if let Some((i, c)) = chars.next() {
-                        if !c.is_alphanumeric() && c != '_' {
-                            let s = &source[start..i];
-                            break Ok((Token::Number(s), i));
-                        }
-                    } else {
-                        let s = &source[start..];
-                        break Ok((Token::Number(s), source.len()));
-                    }
+                _ if c.is_digit(10) => {
+					let mut dot_encountered = false;
+					let mut prev_was_dot = false;
+					loop {
+						if let Some((i, c)) = chars.next() {
+							if !c.is_alphanumeric() && c != '_' {
+								if dot_encountered || c != '.' {
+									let i = if prev_was_dot { i - 1 } else { i };
+									let s = &source[start..i];
+									break Ok((Token::Number(s), i));
+								} else {
+									dot_encountered = true;
+									prev_was_dot = true;
+								}
+							} else {
+								prev_was_dot = false;
+							}
+						} else {
+							let s = &source[start..];
+							break Ok((Token::Number(s), source.len()));
+						}
+					}
                 },
                 _ => {
                     let (s, i) = loop {
@@ -255,6 +294,7 @@ mod test {
             assert_eq!(Token::parse("0"), Ok((Token::Number("0"), 1)));
             assert_eq!(Token::parse("42_i32"), Ok((Token::Number("42_i32"), 6)));
             assert_eq!(Token::parse("0b10101"), Ok((Token::Number("0b10101"), 7)));
+            assert_eq!(Token::parse("13.37"), Ok((Token::Number("13.37"), 5)));
         }
 
         #[test]
@@ -337,7 +377,7 @@ mod test {
             assert_eq!(Token::parse("\n"), Ok((Token::EOL, 1)));
             assert_eq!(Token::parse("\r\n"), Ok((Token::EOL, 2)));
             assert_eq!(Token::parse(","), Ok((Token::Comma, 1)));
-            assert_eq!(Token::parse("pass"), Ok((Token::Pass, 1)));
+            assert_eq!(Token::parse("pass"), Ok((Token::Pass, 4)));
         }
     }
 

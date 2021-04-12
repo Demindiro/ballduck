@@ -7,12 +7,13 @@ mod script;
 mod tokenizer;
 
 use rustc_hash::FxHashMap;
-pub use script::{Script, ScriptIter, ScriptType};
+pub use script::{Class, ScriptIter, ScriptType};
+use script::Script;
 
 use bytecode::ByteCode;
 use tokenizer::TokenStream;
 
-pub fn parse(source: &str) -> Result<Script, ()> {
+pub fn parse(source: &str) -> Result<Class, ()> {
     let tks = TokenStream::parse(source).unwrap();
     let ast = ast::Script::parse(tks).unwrap();
 
@@ -37,10 +38,10 @@ pub fn parse(source: &str) -> Result<Script, ()> {
             Ok(f) => {
                 script.functions.insert(name, f);
             }
-            Err(_) => panic!(),
+            Err(e) => todo!("{:?}", e),
         }
     }
     script.functions.shrink_to_fit();
 
-    Ok(script)
+    Ok(script.into())
 }

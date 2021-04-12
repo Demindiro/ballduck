@@ -38,9 +38,12 @@ pub(crate) enum Statement<'src> {
         expr: Expression<'src>,
         lines: Lines<'src>,
     },
+	Return {
+		expr: Option<Expression<'src>>,
+	},
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum Atom<'src> {
     Name(&'src str),
     Real(Real),
@@ -156,11 +159,19 @@ impl<'src> Function<'src> {
             None => err!(UnexpectedEOL, 0, 0),
         }
 
-        let parameters = Vec::new();
+        let mut parameters = Vec::new();
         loop {
             match skip_whitespace(tokens) {
                 Some((Token::BracketRoundClose, _, _)) => break,
-                _ => todo!(),
+				Some((Token::Name(a), l, c)) => {
+					parameters.push(a);
+					match skip_whitespace(tokens) {
+						Some((Token::BracketRoundClose, ..)) => break,
+						Some((Token::Comma, ..)) => (),
+						e => todo!("{:?}", e),
+					}
+				}
+                e => todo!("{:?}", e),
             }
         }
 
@@ -216,8 +227,8 @@ impl<'src> Function<'src> {
                                     let (expr, last_tk) = Expression::parse(pre, tokens)?;
                                     args.push(expr);
                                     match last_tk {
-                                        Token::Comma => (),
-                                        Token::BracketRoundClose => break,
+                                        Some(Token::Comma) => (),
+                                        Some(Token::BracketRoundClose) => break,
                                         tk => {
                                             panic!("Expression did not parse all tokens: {:?}", tk)
                                         }
@@ -249,7 +260,7 @@ impl<'src> Function<'src> {
                         Some((tk, ..)) => Expression::parse(tk, tokens)?,
                         None => err!(UnexpectedEOL, line, column),
                     };
-                    if tk == Token::EOL {
+                    if tk == Some(Token::EOL) {
                         let expected_indent = expected_indent + 1;
                         'eol: loop {
                             for i in 0..expected_indent {
@@ -279,10 +290,18 @@ impl<'src> Function<'src> {
                     }
                 }
                 Some((Token::Pass, ..)) => (),
-                Some((tk, ..)) => {
-                    dbg!(tk);
-                    todo!()
-                }
+				Some((Token::Return, l, c)) => {
+					if let Some((tk, l, c)) = skip_whitespace(tokens) {
+						let expr = match Expression::parse(tk, tokens) {
+							Ok(expr) => Some(expr.0),
+							e => todo!("{:?}", e),
+						};
+						lines.push(Statement::Return { expr });
+					} else {
+						err!(UnexpectedEOL, l, c);
+					}
+				}
+                Some((tk, ..)) => todo!("{:?}", tk),
                 None => return Ok((lines, 0)),
             };
         }
@@ -293,44 +312,108 @@ impl<'src> Expression<'src> {
     fn parse(
         pre: Token<'src>,
         tokens: &mut impl Iterator<Item = (Token<'src>, usize, usize)>,
-    ) -> Result<(Self, Token<'src>), Error> {
+    ) -> Result<(Self, Option<Token<'src>>), Error> {
         let (lhs, last_tk) = match pre {
             Token::BracketRoundOpen => match skip_whitespace(tokens) {
-                Some((pre, ..)) => Self::parse(pre, tokens).map(|(e, t)| (e, Some(t)))?,
+                Some((pre, ..)) => Self::parse(pre, tokens).map(|(e, t)| (e, t))?,
                 None => err!(UnexpectedEOL, 0, 0),
             },
             Token::String(s) => (Expression::Atom(Atom::String(s)), None),
             Token::Number(n) => (
                 Expression::Atom(if let Ok(n) = parse_integer(n) {
-                    Atom::Integer(n)
-                } else if let Ok(n) = Real::from_str(n) {
-                    Atom::Real(n)
+                    n
                 } else {
-                    dbg!(n);
                     err!(NotANumber, 0, 0);
                 }),
                 None,
             ),
-            e => {
-                dbg!(e);
-                todo!()
-            }
+			Token::Name(name) => {
+				match skip_whitespace(tokens) {
+					Some((Token::BracketRoundOpen, ..)) => {
+						let mut arguments = Vec::new();
+						loop {
+							match skip_whitespace(tokens) {
+								Some((Token::Number(n), l, c)) => {
+									if let Ok(n) = parse_integer(n) {
+										arguments.push(Expression::Atom(n));
+									} else {
+										err!(NotANumber, l, c);
+									}
+								},
+								e => todo!("{:?}", e),
+							}
+							match skip_whitespace(tokens) {
+								Some((Token::Comma, ..)) => (),
+								Some((Token::BracketRoundClose, ..)) => break,
+								Some((_, l, c)) => err!(UnexpectedToken, l, c),
+								None => err!(UnexpectedEOL, 0, 0),
+							}
+						}
+						(Expression::Function { name, arguments }, None)
+					}
+					Some((tk, ..)) => (Expression::Atom(Atom::Name(name)), Some(tk)),
+					e => todo!("{:?}", e),
+				}
+			}
+            e => todo!("{:?}", e),
         };
-        match skip_whitespace(tokens) {
-            Some((Token::BracketRoundClose, ..)) => return Ok((lhs, Token::BracketRoundClose)),
-            Some((Token::Comma, ..)) => return Ok((lhs, Token::Comma)),
-            Some((Token::EOL, ..)) => return Ok((lhs, Token::EOL)),
-            Some((tk, ..)) => todo!("{:?}", tk),
-            None => todo!("none"),
-        }
-        /*
-        let lhs = match skip_whitespace(tokens) {
-            Some((Token::BracketRoundOpen, ..)) => Self::parse(tokens)?,
-            Some((Token::String(s), ..)) => Expression::Atom(Atom::String(s)),
-            Some(e) => { dbg!(e); todo!() },
-            None => todo!(),
-        };
-        */
+		if let Some(last_tk) = last_tk {
+			match last_tk {
+				Token::Op(opl) => {
+					match skip_whitespace(tokens) {
+						Some((Token::Name(mid), ..)) => {
+							let mid = Expression::Atom(Atom::Name(mid));
+							match skip_whitespace(tokens) {
+								Some((Token::Op(opr), ..)) => {
+									match skip_whitespace(tokens) {
+										Some((Token::Name(rhs), ..)) => {
+											let (left, op, right) = if opl >= opr {
+												let rhs = Expression::parse(Token::Name(rhs), tokens)?.0;
+												let lhs = Expression::Operation {
+													op: opl,
+													left: Box::new(lhs),
+													right: Box::new(mid),
+												};
+												(lhs, opr, rhs)
+											} else {
+												let rhs = Expression::Atom(Atom::Name(rhs));
+												let rhs = Expression::Operation {
+													op: opr,
+													left: Box::new(mid),
+													right: Box::new(rhs),
+												};
+												(lhs, opl, rhs)
+											};
+											let (left, right) = (Box::new(left), Box::new(right));
+											Ok((Expression::Operation { left, op, right }, skip_whitespace(tokens).map(|v| v.0)))
+										}
+										e => todo!("{:?}", e),
+									}
+								}
+								Some((tk, ..)) if tk == Token::BracketRoundClose || tk == Token::EOL => {
+									Ok((Expression::Operation {
+										left: Box::new(lhs),
+										op: opl,
+										right: Box::new(mid),
+									}, Some(tk)))
+								}
+								e => todo!("{:?}", e),
+							}
+						}
+						e => todo!("{:?}", e),
+					}
+				}
+				e => todo!("{:?}", e),
+			}
+		} else {
+			match skip_whitespace(tokens) {
+				Some((Token::BracketRoundClose, ..)) => return Ok((lhs, Some(Token::BracketRoundClose))),
+				Some((Token::Comma, ..)) => return Ok((lhs, Some(Token::Comma))),
+				Some((Token::EOL, ..)) => return Ok((lhs, Some(Token::EOL))),
+				Some((tk, ..)) => todo!("{:?}", tk),
+				None => todo!("none"),
+			}
+		}
     }
 }
 
@@ -344,26 +427,32 @@ impl Error {
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum NumberParseError {
     InvalidBase,
     InvalidDigit,
     Empty,
+	SeparatorInWrongPosition,
 }
 
-/// Custom integer parsing function that allows underscores
-fn parse_integer(s: &str) -> Result<Integer, NumberParseError> {
+/// Custom number parsing function that allows underscores
+fn parse_integer(s: &str) -> Result<Atom, NumberParseError> {
     let mut chars = s.chars();
     let (mut chars, base) = if chars.next() == Some('0') {
         if let Some(c) = chars.next() {
-            let b = match c {
-                'x' => 16,
-                'b' => 2,
-                'o' => 8,
+            if let Some(b) = match c {
+                'x' => Some(16),
+                'b' => Some(2),
+                'o' => Some(8),
+				'0' | '.' => None,
                 _ => return Err(NumberParseError::InvalidBase),
-            };
-            (chars, b)
+            } {
+				(chars, b)
+			} else {
+				(s.chars(), 10)
+			}
         } else {
-            return Ok(0);
+            return Ok(Atom::Integer(0));
         }
     } else {
         (s.chars(), 10)
@@ -371,18 +460,67 @@ fn parse_integer(s: &str) -> Result<Integer, NumberParseError> {
     if s == "" {
         Err(NumberParseError::Empty)
     } else {
-        let mut chars = chars.peekable();
-        let neg = if chars.peek() == Some(&'-') {
-            chars.next();
-            true
-        } else {
-            false
-        };
-        let mut n = 0;
-        for c in chars.filter(|&c| c != '_') {
-            n *= base as Integer;
-            n += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as isize;
-        }
-        Ok(if neg { -n } else { n })
+		let mut chars = chars.peekable();
+		let neg = if chars.peek() == Some(&'-') {
+			chars.next();
+			true
+		} else {
+			false
+		};
+		let mut chars = chars.filter(|&c| c != '_').peekable();
+		// Real numbers and integers have to be processed separately as the range of a real can
+		// exceed that of an integer
+		if s.contains('.') {
+			// Don't accept '.0', '0.' or even '.'. While many languages accept the former two,
+			// I believe they are a poor choice for readability, hence they are disallowed.
+			if chars.peek().unwrap() == &'.' {
+				return Err(NumberParseError::SeparatorInWrongPosition);
+			}
+			let mut n = 0.0;
+			loop {
+				let c = chars.next().unwrap();
+				if c == '.' {
+					break;
+				}
+				n *= base as Real;
+				n += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as Real;
+			}
+			if chars.peek() == None {
+				return Err(NumberParseError::SeparatorInWrongPosition);
+			}
+			let mut i = 1.0 / base as Real;
+			for c in chars {
+				n += (c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as Real) * i;
+				i /= base as Real;
+			}
+			Ok(Atom::Real(if neg { -n } else { n }))
+		} else {
+			let mut n = 0;
+			for c in chars {
+				n *= base as Integer;
+				// Negative numbers have a larger range than positive numbers (e.g. i8 has range -128..127)
+				n -= c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as Integer;
+			}
+			Ok(Atom::Integer(if neg { n } else { -n }))
+		}
     }
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn number() {
+		assert_eq!(parse_integer("0"), Ok(Atom::Integer(0)));
+		assert_eq!(parse_integer("32"), Ok(Atom::Integer(32)));
+		assert_eq!(parse_integer("0.0"), Ok(Atom::Real(0.0)));
+		match parse_integer("13.37") {
+			Ok(Atom::Real(f)) => assert!((f - 13.37).abs() <= Real::EPSILON * 13.37),
+			r => panic!("{:?}", r),
+		}
+		assert_eq!(parse_integer("."), Err(NumberParseError::SeparatorInWrongPosition));
+		assert_eq!(parse_integer("0."), Err(NumberParseError::SeparatorInWrongPosition));
+		assert_eq!(parse_integer(".0"), Err(NumberParseError::SeparatorInWrongPosition));
+	}
 }
