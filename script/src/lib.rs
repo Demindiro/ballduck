@@ -7,14 +7,16 @@ mod script;
 mod tokenizer;
 
 use rustc_hash::FxHashMap;
-pub use script::{Class, ScriptIter, ScriptType};
 use script::Script;
+pub use script::{Class, ScriptIter, ScriptType};
 
 use bytecode::ByteCode;
 use tokenizer::TokenStream;
 
 pub fn parse(source: &str) -> Result<Class, ()> {
+    println!("Source:\n---\n{}\n---", source);
     let tks = TokenStream::parse(source).unwrap();
+    dbg!(&tks);
     let ast = ast::Script::parse(tks).unwrap();
 
     let locals = {

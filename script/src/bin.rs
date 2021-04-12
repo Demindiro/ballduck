@@ -11,7 +11,7 @@ pub fn main() -> Result<(), io::Error> {
             Ok(source) => match ballscript::parse(&source) {
                 Ok(script) => {
                     let mut script = script.instance();
-					dbg!(&script);
+                    dbg!(&script);
                     match script.call("main", &[]) {
                         Ok(_) => Ok(()),
                         Err(e) => todo!("{:?}", e),

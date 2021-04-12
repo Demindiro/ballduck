@@ -15,8 +15,8 @@ pub enum Op {
     GreaterEq,
     Less,
     Greater,
-	ShiftLeft,
-	ShiftRight,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -53,21 +53,21 @@ pub enum Token<'src> {
     For,
     In,
     Fn,
-    EOL,
-    Tab,
-    Space,
+    Indent(u8),
     Return,
     Comma,
     Pass,
-	Dot,
+    Dot,
 }
 
 #[derive(Debug, PartialEq)]
-enum TokenError {
+pub enum TokenError {
     Empty,
     UnterminatedString,
     InvalidOp,
     InvalidAssignOp,
+    SpaceInIndent,
+    IndentationOverflow,
 }
 
 #[derive(Debug)]
@@ -77,41 +77,39 @@ pub struct TokenStream<'src> {
 
 #[derive(Debug, PartialEq)]
 pub enum TokenStreamError {
-    UnterminatedString,
-    InvalidOp,
-    InvalidAssignOp,
+    TokenError(TokenError),
 }
 
 impl Op {
-	fn precedence(&self) -> i8 {
-		use Op::*;
-		match *self {
-			Not => 11,
-			Mul | Div | Rem => 10,
-			Add | Sub => 9,
-			ShiftRight | ShiftLeft => 8,
-			And => 7,
-			Xor => 6,
-			Or => 5,
-			Less | Greater | LessEq | GreaterEq => 4,
-			Eq | Neq => 3,
-		}
-	}
+    fn precedence(&self) -> i8 {
+        use Op::*;
+        match *self {
+            Not => 11,
+            Mul | Div | Rem => 10,
+            Add | Sub => 9,
+            ShiftRight | ShiftLeft => 8,
+            And => 7,
+            Xor => 6,
+            Or => 5,
+            Less | Greater | LessEq | GreaterEq => 4,
+            Eq | Neq => 3,
+        }
+    }
 }
 
 impl PartialOrd for Op {
-	fn partial_cmp(&self, rhs: &Self) -> Option<core::cmp::Ordering> {
-		self.precedence().partial_cmp(&rhs.precedence())
-	}
+    fn partial_cmp(&self, rhs: &Self) -> Option<core::cmp::Ordering> {
+        self.precedence().partial_cmp(&rhs.precedence())
+    }
 }
 
 impl Token<'_> {
     const OPERATORS: &'static str = "=+-*/%&|^!<>";
     const BRACKETS: &'static str = "()[]{}";
 
-    fn parse(source: &str) -> Result<(Token, usize), TokenError> {
+    fn parse(source: &str, start_of_file: bool) -> Result<(Token, usize), TokenError> {
         let mut chars = source.char_indices().peekable();
-        while let Some((start, c)) = chars.next() {
+        'chr: while let Some((start, c)) = chars.next() {
             return match c {
                 '#' => {
                     while chars.peek() != None && chars.peek().map(|v| v.1) != Some('\n') {
@@ -119,11 +117,23 @@ impl Token<'_> {
                     }
                     continue;
                 }
-                ' ' => Ok((Token::Space, start + 1)),
-                '\t' => Ok((Token::Tab, start + 1)),
-                '\n' => Ok((Token::EOL, start + 1)),
-                // windows pls
-                '\r' if chars.peek().map(|v| v.1) == Some('\n') => Ok((Token::EOL, start + 2)),
+                ' ' | '\t' if (c != '\t' || !start_of_file) => continue,
+                '\n' | '\t' => {
+                    let s = if c == '\t' { 1 } else { 0 };
+                    loop {
+                        for i in s.. {
+                            return match chars.next() {
+                                Some((_, '\t')) => continue,
+                                Some((_, ' ')) => Err(TokenError::SpaceInIndent),
+                                Some(r) => Ok((Token::Indent(i), start + (i + 1 - s) as usize)),
+                                None => Err(TokenError::Empty),
+                            };
+                        }
+                        break Err(TokenError::IndentationOverflow);
+                    }
+                }
+                // Just ignore it, I can't be arsed with Windows legacy crap
+                '\r' => continue,
                 '(' => Ok((Token::BracketRoundOpen, start + 1)),
                 ')' => Ok((Token::BracketRoundClose, start + 1)),
                 '[' => Ok((Token::BracketSquareOpen, start + 1)),
@@ -131,7 +141,7 @@ impl Token<'_> {
                 '{' => Ok((Token::BracketCurlyOpen, start + 1)),
                 '}' => Ok((Token::BracketCurlyClose, start + 1)),
                 ',' => Ok((Token::Comma, start + 1)),
-				'.' => Ok((Token::Dot, start + 1)),
+                '.' => Ok((Token::Dot, start + 1)),
                 '"' => loop {
                     if let Some((i, c)) = chars.next() {
                         if c == '"' {
@@ -181,28 +191,28 @@ impl Token<'_> {
                     }
                 }
                 _ if c.is_digit(10) => {
-					let mut dot_encountered = false;
-					let mut prev_was_dot = false;
-					loop {
-						if let Some((i, c)) = chars.next() {
-							if !c.is_alphanumeric() && c != '_' {
-								if dot_encountered || c != '.' {
-									let i = if prev_was_dot { i - 1 } else { i };
-									let s = &source[start..i];
-									break Ok((Token::Number(s), i));
-								} else {
-									dot_encountered = true;
-									prev_was_dot = true;
-								}
-							} else {
-								prev_was_dot = false;
-							}
-						} else {
-							let s = &source[start..];
-							break Ok((Token::Number(s), source.len()));
-						}
-					}
-                },
+                    let mut dot_encountered = false;
+                    let mut prev_was_dot = false;
+                    loop {
+                        if let Some((i, c)) = chars.next() {
+                            if !c.is_alphanumeric() && c != '_' {
+                                if dot_encountered || c != '.' {
+                                    let i = if prev_was_dot { i - 1 } else { i };
+                                    let s = &source[start..i];
+                                    break Ok((Token::Number(s), i));
+                                } else {
+                                    dot_encountered = true;
+                                    prev_was_dot = true;
+                                }
+                            } else {
+                                prev_was_dot = false;
+                            }
+                        } else {
+                            let s = &source[start..];
+                            break Ok((Token::Number(s), source.len()));
+                        }
+                    }
+                }
                 _ => {
                     let (s, i) = loop {
                         if let Some((i, c)) = chars.next() {
@@ -245,26 +255,25 @@ impl<'src> TokenStream<'src> {
         let mut line = 1;
         let mut column = 1;
         let mut tokens = Vec::new();
+        let mut start = true;
         loop {
-            match Token::parse(source) {
+            match Token::parse(source, start) {
                 Ok((tk, len)) => {
-                    if tk == Token::EOL {
+                    if let Token::Indent(i) = tk {
                         line += 1;
                         column = 0;
                     }
                     column += len;
                     tokens.push((tk, line, column));
                     source = &source[len..];
+                    start = false;
                 }
                 Err(e) => {
-                    break match e {
-                        TokenError::Empty => {
-                            tokens.shrink_to_fit();
-                            Ok(Self { tokens })
-                        }
-                        TokenError::InvalidOp => Err(TokenStreamError::InvalidOp),
-                        TokenError::InvalidAssignOp => Err(TokenStreamError::InvalidAssignOp),
-                        TokenError::UnterminatedString => Err(TokenStreamError::UnterminatedString),
+                    break if let TokenError::Empty = e {
+                        Self::remove_redundant(&mut tokens);
+                        Ok(Self { tokens })
+                    } else {
+                        Err(TokenStreamError::TokenError(e))
                     }
                 }
             }
@@ -273,6 +282,28 @@ impl<'src> TokenStream<'src> {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Token<'src>, usize, usize)> + '_ {
         self.tokens.iter().cloned()
+    }
+
+    /// Removes redundant tokens, such as multiple Indents in a row. It also shrinks the vec
+    fn remove_redundant(tokens: &mut Vec<(Token, usize, usize)>) {
+        // Remove trailing newlines
+        while let Some((Token::Indent(_), ..)) = tokens.last() {
+            tokens.pop().unwrap();
+        }
+        let mut prev_was_indent = false;
+        // Remove double indents
+        for i in (0..tokens.len()).rev() {
+            match tokens[i] {
+                (Token::Indent(_), ..) => {
+                    if prev_was_indent {
+                        tokens.remove(i);
+                    }
+                    prev_was_indent = true;
+                }
+                _ => prev_was_indent = false,
+            }
+        }
+        tokens.shrink_to_fit();
     }
 }
 
@@ -285,99 +316,145 @@ mod test {
 
         #[test]
         fn empty() {
-            assert_eq!(Token::parse(""), Err(TokenError::Empty));
-            assert_eq!(Token::parse("# This is a comment"), Err(TokenError::Empty));
+            assert_eq!(Token::parse("", true), Err(TokenError::Empty));
+            assert_eq!(
+                Token::parse("# This is a comment", true),
+                Err(TokenError::Empty)
+            );
         }
 
         #[test]
         fn number() {
-            assert_eq!(Token::parse("0"), Ok((Token::Number("0"), 1)));
-            assert_eq!(Token::parse("42_i32"), Ok((Token::Number("42_i32"), 6)));
-            assert_eq!(Token::parse("0b10101"), Ok((Token::Number("0b10101"), 7)));
-            assert_eq!(Token::parse("13.37"), Ok((Token::Number("13.37"), 5)));
+            assert_eq!(Token::parse("0", true), Ok((Token::Number("0"), 1)));
+            assert_eq!(
+                Token::parse("42_i32", true),
+                Ok((Token::Number("42_i32"), 6))
+            );
+            assert_eq!(
+                Token::parse("0b10101", true),
+                Ok((Token::Number("0b10101"), 7))
+            );
+            assert_eq!(Token::parse("13.37", true), Ok((Token::Number("13.37"), 5)));
         }
 
         #[test]
         fn string() {
             assert_eq!(
-                Token::parse("\"foo bar 42\""),
+                Token::parse("\"foo bar 42\"", true),
                 Ok((Token::String("foo bar 42"), 12))
             );
         }
 
         #[test]
         fn control() {
-            assert_eq!(Token::parse("if"), Ok((Token::If, 2)));
-            assert_eq!(Token::parse("else"), Ok((Token::Else, 4)));
-            assert_eq!(Token::parse("elif"), Ok((Token::Elif, 4)));
-            assert_eq!(Token::parse("while"), Ok((Token::While, 5)));
-            assert_eq!(Token::parse("for"), Ok((Token::For, 3)));
-            assert_eq!(Token::parse("in"), Ok((Token::In, 2)));
-            assert_eq!(Token::parse("return"), Ok((Token::Return, 6)));
+            assert_eq!(Token::parse("if", true), Ok((Token::If, 2)));
+            assert_eq!(Token::parse("else", true), Ok((Token::Else, 4)));
+            assert_eq!(Token::parse("elif", true), Ok((Token::Elif, 4)));
+            assert_eq!(Token::parse("while", true), Ok((Token::While, 5)));
+            assert_eq!(Token::parse("for", true), Ok((Token::For, 3)));
+            assert_eq!(Token::parse("in", true), Ok((Token::In, 2)));
+            assert_eq!(Token::parse("return", true), Ok((Token::Return, 6)));
         }
 
         #[test]
         fn brackets() {
-            assert_eq!(Token::parse("("), Ok((Token::BracketRoundOpen, 1)));
-            assert_eq!(Token::parse(")"), Ok((Token::BracketRoundClose, 1)));
-            assert_eq!(Token::parse("["), Ok((Token::BracketSquareOpen, 1)));
-            assert_eq!(Token::parse("]"), Ok((Token::BracketSquareClose, 1)));
-            assert_eq!(Token::parse("{"), Ok((Token::BracketCurlyOpen, 1)));
-            assert_eq!(Token::parse("}"), Ok((Token::BracketCurlyClose, 1)));
+            assert_eq!(Token::parse("(", true), Ok((Token::BracketRoundOpen, 1)));
+            assert_eq!(Token::parse(")", true), Ok((Token::BracketRoundClose, 1)));
+            assert_eq!(Token::parse("[", true), Ok((Token::BracketSquareOpen, 1)));
+            assert_eq!(Token::parse("]", true), Ok((Token::BracketSquareClose, 1)));
+            assert_eq!(Token::parse("{", true), Ok((Token::BracketCurlyOpen, 1)));
+            assert_eq!(Token::parse("}", true), Ok((Token::BracketCurlyClose, 1)));
         }
 
         #[test]
         fn op() {
-            assert_eq!(Token::parse("+"), Ok((Token::Op(Op::Add), 1)));
-            assert_eq!(Token::parse("-"), Ok((Token::Op(Op::Sub), 1)));
-            assert_eq!(Token::parse("*"), Ok((Token::Op(Op::Mul), 1)));
-            assert_eq!(Token::parse("/"), Ok((Token::Op(Op::Div), 1)));
-            assert_eq!(Token::parse("%"), Ok((Token::Op(Op::Rem), 1)));
-            assert_eq!(Token::parse("&"), Ok((Token::Op(Op::And), 1)));
-            assert_eq!(Token::parse("|"), Ok((Token::Op(Op::Or), 1)));
-            assert_eq!(Token::parse("^"), Ok((Token::Op(Op::Xor), 1)));
-            assert_eq!(Token::parse("!"), Ok((Token::Op(Op::Not), 1)));
-            assert_eq!(Token::parse("<"), Ok((Token::Op(Op::Less), 1)));
-            assert_eq!(Token::parse(">"), Ok((Token::Op(Op::Greater), 1)));
-            assert_eq!(Token::parse("!="), Ok((Token::Op(Op::Neq), 2)));
-            assert_eq!(Token::parse("<="), Ok((Token::Op(Op::LessEq), 2)));
-            assert_eq!(Token::parse(">="), Ok((Token::Op(Op::GreaterEq), 2)));
+            assert_eq!(Token::parse("+", true), Ok((Token::Op(Op::Add), 1)));
+            assert_eq!(Token::parse("-", true), Ok((Token::Op(Op::Sub), 1)));
+            assert_eq!(Token::parse("*", true), Ok((Token::Op(Op::Mul), 1)));
+            assert_eq!(Token::parse("/", true), Ok((Token::Op(Op::Div), 1)));
+            assert_eq!(Token::parse("%", true), Ok((Token::Op(Op::Rem), 1)));
+            assert_eq!(Token::parse("&", true), Ok((Token::Op(Op::And), 1)));
+            assert_eq!(Token::parse("|", true), Ok((Token::Op(Op::Or), 1)));
+            assert_eq!(Token::parse("^", true), Ok((Token::Op(Op::Xor), 1)));
+            assert_eq!(Token::parse("!", true), Ok((Token::Op(Op::Not), 1)));
+            assert_eq!(Token::parse("<", true), Ok((Token::Op(Op::Less), 1)));
+            assert_eq!(Token::parse(">", true), Ok((Token::Op(Op::Greater), 1)));
+            assert_eq!(Token::parse("!=", true), Ok((Token::Op(Op::Neq), 2)));
+            assert_eq!(Token::parse("<=", true), Ok((Token::Op(Op::LessEq), 2)));
+            assert_eq!(Token::parse(">=", true), Ok((Token::Op(Op::GreaterEq), 2)));
         }
 
         #[test]
         fn assign_op() {
-            assert_eq!(Token::parse("="), Ok((Token::Assign(AssignOp::None), 1)));
-            assert_eq!(Token::parse("+="), Ok((Token::Assign(AssignOp::Add), 2)));
-            assert_eq!(Token::parse("-="), Ok((Token::Assign(AssignOp::Sub), 2)));
-            assert_eq!(Token::parse("*="), Ok((Token::Assign(AssignOp::Mul), 2)));
-            assert_eq!(Token::parse("/="), Ok((Token::Assign(AssignOp::Div), 2)));
-            assert_eq!(Token::parse("%="), Ok((Token::Assign(AssignOp::Rem), 2)));
-            assert_eq!(Token::parse("&="), Ok((Token::Assign(AssignOp::And), 2)));
-            assert_eq!(Token::parse("|="), Ok((Token::Assign(AssignOp::Or), 2)));
-            assert_eq!(Token::parse("^="), Ok((Token::Assign(AssignOp::Xor), 2)));
+            assert_eq!(
+                Token::parse("=", true),
+                Ok((Token::Assign(AssignOp::None), 1))
+            );
+            assert_eq!(
+                Token::parse("+=", true),
+                Ok((Token::Assign(AssignOp::Add), 2))
+            );
+            assert_eq!(
+                Token::parse("-=", true),
+                Ok((Token::Assign(AssignOp::Sub), 2))
+            );
+            assert_eq!(
+                Token::parse("*=", true),
+                Ok((Token::Assign(AssignOp::Mul), 2))
+            );
+            assert_eq!(
+                Token::parse("/=", true),
+                Ok((Token::Assign(AssignOp::Div), 2))
+            );
+            assert_eq!(
+                Token::parse("%=", true),
+                Ok((Token::Assign(AssignOp::Rem), 2))
+            );
+            assert_eq!(
+                Token::parse("&=", true),
+                Ok((Token::Assign(AssignOp::And), 2))
+            );
+            assert_eq!(
+                Token::parse("|=", true),
+                Ok((Token::Assign(AssignOp::Or), 2))
+            );
+            assert_eq!(
+                Token::parse("^=", true),
+                Ok((Token::Assign(AssignOp::Xor), 2))
+            );
         }
 
         #[test]
         fn declare() {
-            assert_eq!(Token::parse("let foo"), Ok((Token::Let, 3)));
+            assert_eq!(Token::parse("let foo", true), Ok((Token::Let, 3)));
         }
 
         #[test]
         fn name() {
-            assert_eq!(Token::parse("foo"), Ok((Token::Name("foo"), 3)));
-            assert_eq!(Token::parse("_4343"), Ok((Token::Name("_4343"), 5)));
-            assert_eq!(Token::parse("hunter2"), Ok((Token::Name("hunter2"), 7)));
+            assert_eq!(Token::parse("foo", true), Ok((Token::Name("foo"), 3)));
+            assert_eq!(Token::parse("_4343", true), Ok((Token::Name("_4343"), 5)));
+            assert_eq!(
+                Token::parse("hunter2", true),
+                Ok((Token::Name("hunter2"), 7))
+            );
         }
 
         #[test]
         fn other() {
-            assert_eq!(Token::parse(" "), Ok((Token::Space, 1)));
-            assert_eq!(Token::parse("\t"), Ok((Token::Tab, 1)));
-            assert_eq!(Token::parse("\n"), Ok((Token::EOL, 1)));
-            assert_eq!(Token::parse("\n"), Ok((Token::EOL, 1)));
-            assert_eq!(Token::parse("\r\n"), Ok((Token::EOL, 2)));
-            assert_eq!(Token::parse(","), Ok((Token::Comma, 1)));
-            assert_eq!(Token::parse("pass"), Ok((Token::Pass, 4)));
+            assert_eq!(Token::parse(" ", true), Err(TokenError::Empty));
+            assert_eq!(Token::parse("\n", true), Err(TokenError::Empty));
+            assert_eq!(Token::parse("\r\n", true), Err(TokenError::Empty));
+            //assert_eq!(Token::parse("\t\n\t", true), Err(TokenError::Empty));
+            assert_eq!(
+                Token::parse("\t\tblah blah", true),
+                Ok((Token::Indent(2), 2))
+            );
+            assert_eq!(
+                Token::parse(" blah blah", true),
+                Ok((Token::Name("blah"), 5))
+            );
+            assert_eq!(Token::parse(",", true), Ok((Token::Comma, 1)));
+            assert_eq!(Token::parse("pass", true), Ok((Token::Pass, 4)));
         }
     }
 
@@ -390,12 +467,10 @@ mod test {
             let s = TokenStream::parse(src).expect("Failed to parse source");
             let mut s = s.iter().map(|(v, _, _)| v);
             assert_eq!(s.next(), Some(Token::Fn));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("main")));
             assert_eq!(s.next(), Some(Token::BracketRoundOpen));
             assert_eq!(s.next(), Some(Token::BracketRoundClose));
-            assert_eq!(s.next(), Some(Token::EOL));
-            assert_eq!(s.next(), Some(Token::Tab));
+            assert_eq!(s.next(), Some(Token::Indent(1)));
             assert_eq!(s.next(), Some(Token::Name("println")));
             assert_eq!(s.next(), Some(Token::BracketRoundOpen));
             assert_eq!(s.next(), Some(Token::String("Hello, world!")));
@@ -409,30 +484,20 @@ mod test {
             let s = TokenStream::parse(src).expect("Failed to parse source");
             let mut s = s.iter().map(|(v, _, _)| v);
             assert_eq!(s.next(), Some(Token::Fn));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("vec2_len")));
             assert_eq!(s.next(), Some(Token::BracketRoundOpen));
             assert_eq!(s.next(), Some(Token::Name("x")));
             assert_eq!(s.next(), Some(Token::Comma));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("y")));
             assert_eq!(s.next(), Some(Token::BracketRoundClose));
-            assert_eq!(s.next(), Some(Token::EOL));
-            assert_eq!(s.next(), Some(Token::Tab));
+            assert_eq!(s.next(), Some(Token::Indent(1)));
             assert_eq!(s.next(), Some(Token::Return));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("x")));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Op(Op::Mul)));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("x")));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Op(Op::Add)));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("y")));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Op(Op::Mul)));
-            assert_eq!(s.next(), Some(Token::Space));
             assert_eq!(s.next(), Some(Token::Name("y")));
             assert_eq!(s.next(), None);
         }

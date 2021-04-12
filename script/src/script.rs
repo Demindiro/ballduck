@@ -1,9 +1,9 @@
-use core::ops::{Add, Mul};
-use core::any::Any;
 use crate::bytecode::{ByteCode, CallResult, Environment, RunError};
+use core::any::Any;
 use core::fmt::Debug;
-use std::sync::Arc;
+use core::ops::{Add, Mul};
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 pub struct Class(Arc<Script>);
 
@@ -27,61 +27,57 @@ pub enum CallError {
     RunError(RunError),
     /// This is specifically intended for operations on `()` AKA "null"
     IsEmpty,
-	InvalidOperator,
-	IncompatibleType,
+    InvalidOperator,
+    IncompatibleType,
 }
 
 pub trait ScriptType: Debug + Any {
-    fn call(
-        &mut self,
-        function: &str,
-        args: &[&dyn ScriptType],
-    ) -> CallResult<CallError>;
+    fn call(&mut self, function: &str, args: &[&dyn ScriptType]) -> CallResult<CallError>;
 
-	fn dup(&self) -> Box<dyn ScriptType>;
+    fn dup(&self) -> Box<dyn ScriptType>;
 
-	fn mul(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
-		let _ = rhs;
-		Err(CallError::InvalidOperator)
-	}
+    fn mul(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
+        let _ = rhs;
+        Err(CallError::InvalidOperator)
+    }
 
-	fn add(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
-		let _ = rhs;
-		Err(CallError::InvalidOperator)
-	}
+    fn add(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
+        let _ = rhs;
+        Err(CallError::InvalidOperator)
+    }
 
-	// rust pls
-	fn as_any(&self) -> Box<dyn Any>;
+    // rust pls
+    fn as_any(&self) -> Box<dyn Any>;
 }
 
 impl Mul<Self> for &Box<dyn ScriptType> {
-	type Output = CallResult<CallError>;
+    type Output = CallResult<CallError>;
 
-	fn mul(self, rhs: Self) -> Self::Output {
-		self.as_ref().mul(rhs)
-	}
+    fn mul(self, rhs: Self) -> Self::Output {
+        self.as_ref().mul(rhs)
+    }
 }
 
 impl Add<Self> for &Box<dyn ScriptType> {
-	type Output = CallResult<CallError>;
+    type Output = CallResult<CallError>;
 
-	fn add(self, rhs: Self) -> Self::Output {
-		self.as_ref().add(rhs)
-	}
+    fn add(self, rhs: Self) -> Self::Output {
+        self.as_ref().add(rhs)
+    }
 }
 
 /// Regular ol' clone doesn't work because of [`Sized`] stuff, so this exists
 macro_rules! impl_dup {
-	() => {
-		fn dup(&self) -> Box<dyn ScriptType> {
-			Box::new(self.clone()) as Box<dyn ScriptType>
-		}
+    () => {
+        fn dup(&self) -> Box<dyn ScriptType> {
+            Box::new(self.clone()) as Box<dyn ScriptType>
+        }
 
-		fn as_any(&self) -> Box<dyn Any> {
-			// FIXME avoid clone
-			Box::new(self.clone())
-		}
-	};
+        fn as_any(&self) -> Box<dyn Any> {
+            // FIXME avoid clone
+            Box::new(self.clone())
+        }
+    };
 }
 
 pub trait ScriptIter: Debug {
@@ -120,7 +116,9 @@ impl Script {
         .unwrap();
 
         if let Some(function) = self.functions.get(function) {
-            function.run(&self.functions, locals, args, &env).map_err(CallError::RunError)
+            function
+                .run(&self.functions, locals, args, &env)
+                .map_err(CallError::RunError)
         } else {
             Err(CallError::UndefinedFunction)
         }
@@ -137,9 +135,9 @@ impl Class {
 }
 
 impl From<Script> for Class {
-	fn from(script: Script) -> Self {
-		Self(Arc::new(script))
-	}
+    fn from(script: Script) -> Self {
+        Self(Arc::new(script))
+    }
 }
 
 impl ScriptType for Instance {
@@ -147,13 +145,13 @@ impl ScriptType for Instance {
         self.script.call(function, &mut self.variables, args)
     }
 
-	fn dup(&self) -> Box<dyn ScriptType> {
-		todo!();
-	}
+    fn dup(&self) -> Box<dyn ScriptType> {
+        todo!();
+    }
 
-	fn as_any(&self) -> Box<dyn Any> {
-		todo!();
-	}
+    fn as_any(&self) -> Box<dyn Any> {
+        todo!();
+    }
 }
 
 impl ScriptType for () {
@@ -161,7 +159,7 @@ impl ScriptType for () {
         Err(CallError::IsEmpty)
     }
 
-	impl_dup!();
+    impl_dup!();
 }
 
 impl ScriptType for isize {
@@ -169,7 +167,7 @@ impl ScriptType for isize {
         todo!()
     }
 
-	impl_dup!();
+    impl_dup!();
 }
 
 impl ScriptType for f64 {
@@ -177,23 +175,21 @@ impl ScriptType for f64 {
         todo!()
     }
 
-	impl_dup!();
+    impl_dup!();
 
-	fn mul(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
-		rhs
-			.as_any()
-			.downcast_ref::<Self>()
-			.map(|rhs| Box::new(self * rhs) as Box<dyn ScriptType>)
-			.ok_or(CallError::IncompatibleType)
-	}
+    fn mul(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
+        rhs.as_any()
+            .downcast_ref::<Self>()
+            .map(|rhs| Box::new(self * rhs) as Box<dyn ScriptType>)
+            .ok_or(CallError::IncompatibleType)
+    }
 
-	fn add(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
-		rhs
-			.as_any()
-			.downcast_ref::<Self>()
-			.map(|rhs| Box::new(self + rhs) as Box<dyn ScriptType>)
-			.ok_or(CallError::IncompatibleType)
-	}
+    fn add(&self, rhs: &Box<dyn ScriptType>) -> CallResult<CallError> {
+        rhs.as_any()
+            .downcast_ref::<Self>()
+            .map(|rhs| Box::new(self + rhs) as Box<dyn ScriptType>)
+            .ok_or(CallError::IncompatibleType)
+    }
 }
 
 impl ScriptType for Box<str> {
@@ -201,7 +197,7 @@ impl ScriptType for Box<str> {
         todo!()
     }
 
-	impl_dup!();
+    impl_dup!();
 }
 
 impl ScriptType for char {
@@ -209,7 +205,7 @@ impl ScriptType for char {
         todo!()
     }
 
-	impl_dup!();
+    impl_dup!();
 }
 
 impl ScriptType for String {
@@ -217,7 +213,7 @@ impl ScriptType for String {
         todo!()
     }
 
-	impl_dup!();
+    impl_dup!();
 }
 
 impl ScriptIter for isize {
