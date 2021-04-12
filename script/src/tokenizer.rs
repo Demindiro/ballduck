@@ -72,7 +72,7 @@ pub enum TokenError {
 
 #[derive(Debug)]
 pub struct TokenStream<'src> {
-    tokens: Vec<(Token<'src>, usize, usize)>,
+    tokens: Vec<(Token<'src>, u32, u32)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -108,8 +108,8 @@ impl Token<'_> {
     const OPERATORS: &'static str = "=+-*/%&|^!<>.";
     const BRACKETS: &'static str = "()[]{}";
 
-    fn parse(source: &str, start_of_file: bool) -> Result<(Token, usize), TokenError> {
-        let mut chars = source.char_indices().peekable();
+    fn parse(source: &str, start_of_file: bool) -> Result<(Token, u32), TokenError> {
+        let mut chars = source.char_indices().map(|(i, c)| (i as u32, c)).peekable();
         'chr: while let Some((start, c)) = chars.next() {
             return match c {
                 '#' => {
@@ -126,7 +126,7 @@ impl Token<'_> {
                             return match chars.next() {
                                 Some((_, '\t')) => continue,
                                 Some((_, ' ')) => Err(TokenError::SpaceInIndent),
-                                Some(r) => Ok((Token::Indent(i), start + (i + 1 - s) as usize)),
+                                Some(r) => Ok((Token::Indent(i), start + (i + 1 - s) as u32)),
                                 None => Err(TokenError::Empty),
                             };
                         }
@@ -145,7 +145,7 @@ impl Token<'_> {
                 '"' => loop {
                     if let Some((i, c)) = chars.next() {
                         if c == '"' {
-                            let s = &source[start + 1..i];
+                            let s = &source[start as usize + 1..i as usize];
                             break Ok((Token::String(s), i + 1));
                         }
                     } else {
@@ -192,6 +192,7 @@ impl Token<'_> {
                     }
                 }
                 _ if c.is_digit(10) => {
+					let start = start as usize;
                     let mut dot_encountered = false;
                     let mut prev_was_dot = false;
                     loop {
@@ -199,7 +200,7 @@ impl Token<'_> {
                             if !c.is_alphanumeric() && c != '_' {
                                 if dot_encountered || c != '.' {
                                     let i = if prev_was_dot { i - 1 } else { i };
-                                    let s = &source[start..i];
+                                    let s = &source[start..i as usize];
                                     break Ok((Token::Number(s), i));
                                 } else {
                                     dot_encountered = true;
@@ -210,11 +211,12 @@ impl Token<'_> {
                             }
                         } else {
                             let s = &source[start..];
-                            break Ok((Token::Number(s), source.len()));
+                            break Ok((Token::Number(s), source.len() as u32));
                         }
                     }
                 }
                 _ => {
+					let start = start as usize;
                     let (s, i) = loop {
                         if let Some((i, c)) = chars.next() {
                             if c.is_whitespace()
@@ -222,10 +224,10 @@ impl Token<'_> {
                                 || Self::BRACKETS.contains(c)
                                 || c == ','
                             {
-                                break (&source[start..i], i);
+                                break (&source[start..i as usize], i);
                             }
                         } else {
-                            break (&source[start..], source.len());
+                            break (&source[start..], source.len() as u32);
                         }
                     };
                     Ok((
@@ -242,7 +244,7 @@ impl Token<'_> {
                             "pass" => Token::Pass,
                             _ => Token::Name(s),
                         },
-                        i,
+                        i as u32,
                     ))
                 }
             };
@@ -260,13 +262,17 @@ impl<'src> TokenStream<'src> {
         loop {
             match Token::parse(source, start) {
                 Ok((tk, len)) => {
-                    if let Token::Indent(i) = tk {
+                    let prev_col = if let Token::Indent(i) = tk {
                         line += 1;
-                        column = 0;
-                    }
-                    column += len;
-                    tokens.push((tk, line, column));
-                    source = &source[len..];
+                        column = i as u32 + 1;
+						1
+                    } else {
+						let c = column;
+						column += len;
+						c
+					};
+                    tokens.push((tk, line, prev_col));
+                    source = &source[len as usize..];
                     start = false;
                 }
                 Err(e) => {
@@ -281,12 +287,12 @@ impl<'src> TokenStream<'src> {
         }
     }
 
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Token<'src>, usize, usize)> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Token<'src>, u32, u32)> + '_ {
         self.tokens.iter().cloned()
     }
 
     /// Removes redundant tokens, such as multiple Indents in a row. It also shrinks the vec
-    fn remove_redundant(tokens: &mut Vec<(Token, usize, usize)>) {
+    fn remove_redundant(tokens: &mut Vec<(Token, u32, u32)>) {
         // Remove trailing newlines
         while let Some((Token::Indent(_), ..)) = tokens.last() {
             tokens.pop().unwrap();

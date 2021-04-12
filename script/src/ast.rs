@@ -69,8 +69,8 @@ pub(crate) enum Expression<'src> {
 #[derive(Debug)]
 pub struct Error {
     error: ErrorType,
-    line: usize,
-    column: usize,
+    line: u32,
+    column: u32,
     rust_src_line: u32,
 }
 
@@ -124,7 +124,7 @@ impl<'src> Script<'src> {
     }
 }
 
-type TokenGroup<'src> = (Token<'src>, usize, usize);
+type TokenGroup<'src> = (Token<'src>, u32, u32);
 
 impl<'src> Function<'src> {
     fn parse(tokens: &mut impl Iterator<Item = TokenGroup<'src>>) -> Result<Self, Error> {
@@ -173,8 +173,8 @@ impl<'src> Function<'src> {
     fn parse_block(
         tokens: &mut impl Iterator<Item = TokenGroup<'src>>,
         expected_indent: u8,
-        mut line: usize,
-        mut column: usize,
+        mut line: u32,
+        mut column: u32,
     ) -> Result<(Lines<'src>, u8), Error> {
         let mut lines = Lines::new();
         loop {
@@ -256,7 +256,7 @@ impl<'src> Function<'src> {
 impl<'src> Expression<'src> {
     fn parse(
         pre: Token<'src>,
-        tokens: &mut impl Iterator<Item = (Token<'src>, usize, usize)>,
+        tokens: &mut impl Iterator<Item = (Token<'src>, u32, u32)>,
     ) -> Result<(Self, Option<Token<'src>>), Error> {
         let (lhs, last_tk) = match pre {
             Token::BracketRoundOpen => match tokens.next() {
@@ -387,7 +387,7 @@ impl<'src> Expression<'src> {
 }
 
 impl Error {
-    fn new<T>(error: ErrorType, line: usize, column: usize, rust_src_line: u32) -> Result<T, Self> {
+    fn new<T>(error: ErrorType, line: u32, column: u32, rust_src_line: u32) -> Result<T, Self> {
         Err(Self {
             error,
             line,
