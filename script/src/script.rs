@@ -1,5 +1,5 @@
 use crate::bytecode::{ByteCode, CallResult, Environment, RunError};
-use core::any::Any;
+use core::any::{Any, TypeId};
 use core::fmt::Debug;
 use core::ops::{Add, Mul};
 use rustc_hash::FxHashMap;
@@ -47,23 +47,46 @@ pub enum CallError {
     AlreadyBorrowed,
 }
 
-pub trait ScriptType: Debug + Any {
+pub trait ScriptType: Debug + 'static {
     fn call(&self, function: &str, args: &[Rc<dyn ScriptType>]) -> CallResult<CallError>;
 
     fn dup(&self) -> Rc<dyn ScriptType>;
 
+	#[inline]
     fn mul(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
         let _ = rhs;
         Err(CallError::InvalidOperator)
     }
 
+	#[inline]
     fn add(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
         let _ = rhs;
         Err(CallError::InvalidOperator)
     }
 
-    // rust pls
-    fn as_any(&self) -> Box<dyn Any>;
+	#[inline]
+	fn type_id(&self) -> TypeId {
+		Any::type_id(self)
+	}
+}
+
+/// Copied from [`Any`](std::any::Any). As casting between trait objects is not possible
+/// without indirection, this is used instead.
+impl dyn ScriptType + 'static {
+	#[inline]
+	pub fn is<T: 'static>(&self) -> bool {
+		TypeId::of::<T>() == self.type_id()
+	}
+
+	#[inline]
+	pub fn cast<T: 'static>(&self) -> Option<&T> {
+		if self.is::<T>() {
+			// SAFETY: `is` confirmed that the underlying type of the trait object is indeed T.
+			unsafe { Some(&*(self as *const _ as *const _)) }
+		} else {
+			None
+		}
+	}
 }
 
 /*
@@ -89,11 +112,6 @@ macro_rules! impl_dup {
     () => {
         fn dup(&self) -> Rc<dyn ScriptType> {
             Rc::new(self.clone()) as Rc<dyn ScriptType>
-        }
-
-        fn as_any(&self) -> Box<dyn Any> {
-            // FIXME avoid clone
-            Box::new(self.clone())
         }
     };
 }
@@ -170,10 +188,6 @@ impl ScriptType for Instance {
     fn dup(&self) -> Rc<dyn ScriptType> {
         todo!();
     }
-
-    fn as_any(&self) -> Box<dyn Any> {
-        todo!();
-    }
 }
 
 impl ScriptType for () {
@@ -203,15 +217,15 @@ impl ScriptType for f64 {
     impl_dup!();
 
     fn mul(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
-        rhs.as_any()
-            .downcast_ref::<Self>()
+		rhs
+			.cast()
             .map(|rhs| Rc::new(self * rhs) as Rc<dyn ScriptType>)
             .ok_or(CallError::IncompatibleType)
     }
 
     fn add(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
-        rhs.as_any()
-            .downcast_ref::<Self>()
+		rhs
+			.cast()
             .map(|rhs| Rc::new(self + rhs) as Rc<dyn ScriptType>)
             .ok_or(CallError::IncompatibleType)
     }
