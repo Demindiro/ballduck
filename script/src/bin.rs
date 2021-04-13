@@ -10,8 +10,8 @@ pub fn main() -> Result<(), io::Error> {
 		match fs::read_to_string(file) {
 			Ok(source) => match ballscript::parse(&source) {
 				Ok(script) => {
-					let mut script = script.instance();
-					dbg!(&script);
+					let script = script.instance();
+					dbg!(std::mem::size_of::<ballscript::Variant>());
 					match script.call("main", &[]) {
 						Ok(_) => Ok(()),
 						Err(e) => todo!("{:?}", e),

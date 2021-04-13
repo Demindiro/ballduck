@@ -1,7 +1,8 @@
+use unwrap_none::UnwrapNone;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::script::CallError;
 use crate::tokenizer::Op;
-use crate::{ScriptIter, ScriptType};
+use crate::{ScriptIter, ScriptType, ScriptObject, Variant};
 use core::convert::TryInto;
 use core::fmt::{self, Debug, Formatter};
 use rustc_hash::FxHashMap;
@@ -18,7 +19,7 @@ pub(crate) enum Instruction {
 	Call(Box<(u16, CallArgs)>),
 	CallSelf(Box<CallArgs>),
 	CallGlobal(Box<CallArgs>),
-	//Iter(Box<dyn Iterator<Item = Rc<dyn ScriptType>>>),
+	//Iter(Box<dyn Iterator<Item = ScriptObject>>),
 	//Jmp(u32),
 	//JmpIf(u16, u32),
 	RetSome,
@@ -26,6 +27,7 @@ pub(crate) enum Instruction {
 
 	IterConst(Box<(u16, u32, Box<dyn ScriptIter>)>),
 	IterJmp(u16, u32),
+	IterInt(u16, isize),
 
 	/*
 	AndJmp(u16, u16, u32),
@@ -61,7 +63,7 @@ pub(crate) struct ByteCode {
 	code: Vec<Instruction>,
 	param_count: u16,
 	var_count: u16,
-	consts: Vec<Rc<dyn ScriptType>>,
+	consts: Vec<Variant>,
 }
 
 #[derive(Debug)]
@@ -73,14 +75,15 @@ pub enum RunError {
 	UndefinedFunction,
 	CallError(Box<CallError>),
 	IncorrectArgumentCount,
+	IncompatibleType,
 }
 
 pub struct Environment {
 	functions: FxHashMap<Box<str>, EnvironmentFunction>,
 }
 
-pub type EnvironmentFunction = Box<dyn Fn(&[Rc<dyn ScriptType>]) -> CallResult<RunError>>;
-pub type CallResult<E> = Result<Rc<dyn ScriptType>, E>;
+pub type EnvironmentFunction = Box<dyn Fn(&[Variant]) -> CallResult<RunError>>;
+pub type CallResult<E> = Result<Variant, E>;
 
 #[derive(Debug)]
 pub enum EnvironmentError {
@@ -141,7 +144,7 @@ impl ByteCode {
 						conv(a);
 						conv(b);
 					}
-					IterConst(_) | IterJmp(_, _) | RetSome | RetNone => (),
+					IterConst(_) | IterInt(_, _) | IterJmp(_, _) | RetSome | RetNone => (),
 				}
 			}
 		}
@@ -160,7 +163,7 @@ impl ByteCode {
 		locals: &FxHashMap<Box<str>, u16>,
 		instr: &mut Vec<Instruction>,
 		vars: &mut FxHashMap<&'a str, u16>,
-		consts: &mut Vec<Rc<dyn ScriptType>>,
+		consts: &mut Vec<Variant>,
 		curr_var_count: &mut u16,
 		mut min_var_count: u16,
 	) -> Result<u16, ByteCodeError> {
@@ -182,10 +185,10 @@ impl ByteCode {
 						args.push(match a {
 							Expression::Atom(a) => match a {
 								Atom::String(a) => {
-									add_const(Rc::new(a.to_string().into_boxed_str()))
+									add_const(Variant::Object(Rc::new(a.to_string().into_boxed_str())))
 								}
-								Atom::Integer(a) => add_const(Rc::new(*a)),
-								Atom::Real(a) => add_const(Rc::new(*a)),
+								Atom::Integer(a) => add_const(Variant::Integer(*a)),
+								Atom::Real(a) => add_const(Variant::Real(*a)),
 								Atom::Name(a) => todo!("call {:?}", a),
 							},
 							Expression::Function {
@@ -201,11 +204,11 @@ impl ByteCode {
 									match a {
 										Expression::Atom(a) => {
 											args.push(match a {
-												Atom::String(a) => add_const(Rc::new(
+												Atom::String(a) => add_const(Variant::Object(Rc::new(
 													a.to_string().into_boxed_str(),
-												)),
-												Atom::Integer(a) => add_const(Rc::new(*a)),
-												Atom::Real(a) => add_const(Rc::new(*a)),
+												))),
+												Atom::Integer(a) => add_const(Variant::Integer(*a)),
+												Atom::Real(a) => add_const(Variant::Real(*a)),
 												Atom::Name(a) => todo!("call {:?}", a),
 											});
 										}
@@ -250,9 +253,7 @@ impl ByteCode {
 									u32::MAX,
 									Box::new(a.to_string().into_boxed_str()),
 								))),
-								Atom::Integer(a) => {
-									Instruction::IterConst(Box::new((reg, u32::MAX, Box::new(*a))))
-								}
+								Atom::Integer(a) => Instruction::IterInt(reg, *a),
 								//Atom::Real(a) => Instruction::IterConst(Box::new(a)),
 								Atom::Real(a) => todo!("for Real({})", a),
 								Atom::Name(a) => todo!("for {:?}", a),
@@ -274,10 +275,10 @@ impl ByteCode {
 					)?;
 					instr.push(Instruction::IterJmp(reg, ip));
 					let ip = instr.len() as u32;
-					if let Some(Instruction::IterConst(ic)) = instr.get_mut(ic) {
-						ic.1 = ip;
-					} else {
-						unreachable!();
+					match instr.get_mut(ic) {
+						Some(Instruction::IterConst(ic)) => ic.1 = ip,
+						Some(Instruction::IterInt(..)) => (),
+						_ => unreachable!(),
 					}
 				}
 				Statement::Return { expr } => {
@@ -429,8 +430,8 @@ impl ByteCode {
 	pub(crate) fn run(
 		&self,
 		functions: &FxHashMap<Box<str>, Self>,
-		locals: &mut [Rc<dyn ScriptType>],
-		args: &[Rc<dyn ScriptType>],
+		locals: &mut [Variant],
+		args: &[Variant],
 		env: &Environment,
 	) -> CallResult<RunError> {
 		if args.len() != self.param_count as usize {
@@ -440,9 +441,7 @@ impl ByteCode {
 		for a in args.iter() {
 			vars.push(a.clone());
 		}
-		vars.resize_with(self.var_count as usize, || {
-			Rc::new(()) as Rc<dyn ScriptType>
-		});
+		vars.resize(self.var_count as usize, Variant::default());
 		vars.extend(self.consts.iter().cloned());
 		let mut ip = 0;
 		let mut iterators = Vec::new();
@@ -467,7 +466,7 @@ impl ByteCode {
 						for &a in args.iter() {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
-						let obj = vars.get(*reg as usize).ok_or(err_roob())?.as_ref();
+						let obj = vars.get(*reg as usize).ok_or(err_roob())?;
 						let r = obj.call(func, &call_args[..]).map_err(err_call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
@@ -505,7 +504,7 @@ impl ByteCode {
 						}
 					}
 					RetSome => break Ok(vars.first().ok_or(err_roob())?.clone()),
-					RetNone => break Ok(Rc::new(())),
+					RetNone => break Ok(Variant::None),
 					IterConst(box (reg, jmp_ip, iter)) => {
 						let mut iter = iter.iter();
 						if let Some(e) = iter.next() {
@@ -514,6 +513,15 @@ impl ByteCode {
 						} else {
 							ip = *jmp_ip;
 						}
+					}
+					IterInt(reg, i) => {
+						let mut iter = if *i < 0 {
+							Box::new(((1 - i)..=0).rev().map(Variant::Integer)) as Box<dyn Iterator<Item = Variant>>
+						} else {
+							Box::new((0..*i).map(Variant::Integer)) as Box<dyn Iterator<Item = Variant>>
+						};
+						*vars.get_mut(*reg as usize).ok_or(err_roob())? = iter.next().unwrap();
+						iterators.push(iter);
 					}
 					IterJmp(reg, jmp_ip) => {
 						if let Some(iter) = iterators.last_mut() {
@@ -528,13 +536,45 @@ impl ByteCode {
 					Mul(r, a, b) => {
 						let a = vars.get(*a as usize).ok_or(err_roob())?;
 						let b = vars.get(*b as usize).ok_or(err_roob())?;
-						let e = a.mul(b).map_err(err_call)?;
+						let err = || Err(RunError::IncompatibleType);
+						let e = match a {
+							Variant::None => return err(),
+							Variant::Real(a) => match b {
+								Variant::None => return err(),
+								Variant::Real(b) => Variant::Real(a * b),
+								&Variant::Integer(b) => Variant::Real(a * b as f64),
+								Variant::Object(_) => return err(),
+							}
+							&Variant::Integer(a) => match b {
+								Variant::None => return err(),
+								Variant::Real(b) => Variant::Real(a as f64 * b),
+								Variant::Integer(b) => Variant::Integer(a * b),
+								Variant::Object(_) => return err(),
+							}
+							Variant::Object(_) => return err(),
+						};
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
 					Add(r, a, b) => {
 						let a = vars.get(*a as usize).ok_or(err_roob())?;
 						let b = vars.get(*b as usize).ok_or(err_roob())?;
-						let e = a.add(b).map_err(err_call)?;
+						let err = || Err(RunError::IncompatibleType);
+						let e = match a {
+							Variant::None => return err(),
+							Variant::Real(a) => match b {
+								Variant::None => return err(),
+								Variant::Real(b) => Variant::Real(a + b),
+								&Variant::Integer(b) => Variant::Real(a + b as f64),
+								Variant::Object(_) => return err(),
+							}
+							&Variant::Integer(a) => match b {
+								Variant::None => return err(),
+								Variant::Real(b) => Variant::Real(a as f64 + b),
+								Variant::Integer(b) => Variant::Integer(a + b),
+								Variant::Object(_) => return err(),
+							}
+							Variant::Object(_) => return err(),
+						};
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
 					_ => todo!("{:?}", instr),
@@ -567,7 +607,7 @@ impl Environment {
 		}
 	}
 
-	pub fn call(&self, func: &str, args: &[Rc<dyn ScriptType>]) -> CallResult<EnvironmentError> {
+	pub fn call(&self, func: &str, args: &[Variant]) -> CallResult<EnvironmentError> {
 		Ok(self
 			.functions
 			.get(func)
@@ -588,6 +628,7 @@ impl Debug for Instruction {
 			RetSome => write!(f, "ret     0"),
 			RetNone => write!(f, "ret     none"),
 			IterConst(box (r, p, i)) => write!(f, "iter    {}, {}, {:?}", r, p, i),
+			IterInt(r, i) => write!(f, "iter    {}, {}", r, i),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
 			Mul(r, a, b) => write!(f, "mul     {}, {}, {}", r, a, b),

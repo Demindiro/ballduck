@@ -1,6 +1,6 @@
-#![feature(option_expect_none)]
-#![feature(option_unwrap_none)]
 #![feature(box_patterns)]
+
+use unwrap_none::UnwrapNone;
 
 mod ast;
 mod bytecode;
@@ -9,7 +9,7 @@ mod tokenizer;
 
 use rustc_hash::FxHashMap;
 use script::Script;
-pub use script::{Class, ScriptIter, ScriptType};
+pub use script::{Class, ScriptIter, ScriptType, ScriptObject, Variant};
 
 use bytecode::ByteCode;
 use tokenizer::TokenStream;

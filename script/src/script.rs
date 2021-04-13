@@ -9,6 +9,24 @@ use std::sync::Arc;
 
 pub struct Class(Arc<Script>);
 
+#[derive(Clone, Debug)]
+/// Variant type that encodes a few common types. Having the common types
+/// not be hidden behind a dyn trait improves performance greatly
+pub enum Variant {
+	None,
+	Real(f64),
+	Integer(isize),
+	Object(ScriptObject),
+}
+
+impl Default for Variant {
+	fn default() -> Self {
+		Variant::None
+	}
+}
+
+pub type ScriptObject = Rc<dyn ScriptType>;
+
 #[derive(Debug)]
 pub(crate) struct Script {
 	pub(crate) functions: FxHashMap<Box<str>, ByteCode>,
@@ -31,7 +49,7 @@ pub struct Instance {
 	// fast enough (or perhaps even faster) we should use that.
 	// For now, the second option is chosen as the third can't be undone without being a
 	// massive breaking change.
-	variables: RefCell<Box<[Rc<dyn ScriptType>]>>,
+	variables: RefCell<Box<[Variant]>>,
 }
 
 #[derive(Debug)]
@@ -48,18 +66,18 @@ pub enum CallError {
 }
 
 pub trait ScriptType: Debug + 'static {
-	fn call(&self, function: &str, args: &[Rc<dyn ScriptType>]) -> CallResult<CallError>;
+	fn call(&self, function: &str, args: &[Variant]) -> CallResult<CallError>;
 
-	fn dup(&self) -> Rc<dyn ScriptType>;
+	fn dup(&self) -> ScriptObject;
 
 	#[inline]
-	fn mul(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
+	fn mul(&self, rhs: &ScriptObject) -> CallResult<CallError> {
 		let _ = rhs;
 		Err(CallError::InvalidOperator)
 	}
 
 	#[inline]
-	fn add(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
+	fn add(&self, rhs: &ScriptObject) -> CallResult<CallError> {
 		let _ = rhs;
 		Err(CallError::InvalidOperator)
 	}
@@ -90,7 +108,7 @@ impl dyn ScriptType + 'static {
 }
 
 /*
-impl Mul<Self> for &Rc<dyn ScriptType> {
+impl Mul<Self> for &ScriptObject {
 	type Output = CallResult<CallError>;
 
 	fn mul(self, rhs: Self) -> Self::Output {
@@ -98,7 +116,7 @@ impl Mul<Self> for &Rc<dyn ScriptType> {
 	}
 }
 
-impl Add<Self> for &Rc<dyn ScriptType> {
+impl Add<Self> for &ScriptObject {
 	type Output = CallResult<CallError>;
 
 	fn add(self, rhs: Self) -> Self::Output {
@@ -110,17 +128,42 @@ impl Add<Self> for &Rc<dyn ScriptType> {
 /// Regular ol' clone doesn't work because of [`Sized`] stuff, so this exists
 macro_rules! impl_dup {
 	() => {
-		fn dup(&self) -> Rc<dyn ScriptType> {
-			Rc::new(self.clone()) as Rc<dyn ScriptType>
+		fn dup(&self) -> ScriptObject {
+			Rc::new(self.clone()) as ScriptObject
 		}
 	};
+}
+
+macro_rules! check_arg_count {
+	($args:ident, $count:expr) => {
+		if $args.len() != $count {
+			return Err(CallError::BadArgumentCount);
+		}
+	}
 }
 
 pub trait ScriptIter: Debug {
 	fn iter(&self) -> ScriptIterator;
 }
 
-pub type ScriptIterator<'a> = Box<dyn Iterator<Item = Rc<dyn ScriptType>> + 'a>;
+pub type ScriptIterator<'a> = Box<dyn Iterator<Item = Variant> + 'a>;
+
+impl Variant {
+	pub fn call(&self, function: &str, args: &[Variant]) -> Result<Variant, CallError> {
+		match self {
+			Variant::None => Err(CallError::IsEmpty),
+			Variant::Real(r) => match function {
+				"sqrt" => {
+					check_arg_count!(args, 0);
+					Ok(Variant::Real(r.sqrt()))
+				}
+				_ => Err(CallError::UndefinedFunction),
+			}
+			Variant::Integer(i) => Err(CallError::UndefinedFunction),
+			Variant::Object(o) => o.call(function, args),
+		}
+	}
+}
 
 impl Script {
 	pub(crate) fn new(locals: FxHashMap<Box<str>, u16>) -> Self {
@@ -138,15 +181,15 @@ impl Script {
 	fn call(
 		&self,
 		function: &str,
-		locals: &mut [Rc<dyn ScriptType>],
-		args: &[Rc<dyn ScriptType>],
-	) -> Result<Rc<dyn ScriptType>, CallError> {
+		locals: &mut [Variant],
+		args: &[Variant],
+	) -> Result<Variant, CallError> {
 		let mut env = Environment::new();
 		env.add_function(
 			"print".into(),
 			Box::new(|a: &[_]| {
 				a.iter().for_each(|a| println!("{:?}", a));
-				Ok(Rc::new(()))
+				Ok(Variant::None)
 			}),
 		)
 		.unwrap();
@@ -177,7 +220,7 @@ impl From<Script> for Class {
 }
 
 impl ScriptType for Instance {
-	fn call(&self, function: &str, args: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
+	fn call(&self, function: &str, args: &[Variant]) -> CallResult<CallError> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
 			self.script.call(function, &mut vars, args)
 		} else {
@@ -185,52 +228,13 @@ impl ScriptType for Instance {
 		}
 	}
 
-	fn dup(&self) -> Rc<dyn ScriptType> {
+	fn dup(&self) -> ScriptObject {
 		todo!();
 	}
 }
 
-impl ScriptType for () {
-	fn call(&self, _: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
-		Err(CallError::IsEmpty)
-	}
-
-	impl_dup!();
-}
-
-impl ScriptType for isize {
-	fn call(&self, _: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
-		todo!()
-	}
-
-	impl_dup!();
-}
-
-impl ScriptType for f64 {
-	fn call(&self, func: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
-		Ok(Rc::new(match func {
-			"sqrt" => self.sqrt(),
-			_ => return Err(CallError::UndefinedFunction),
-		}))
-	}
-
-	impl_dup!();
-
-	fn mul(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
-		rhs.cast()
-			.map(|rhs| Rc::new(self * rhs) as Rc<dyn ScriptType>)
-			.ok_or(CallError::IncompatibleType)
-	}
-
-	fn add(&self, rhs: &Rc<dyn ScriptType>) -> CallResult<CallError> {
-		rhs.cast()
-			.map(|rhs| Rc::new(self + rhs) as Rc<dyn ScriptType>)
-			.ok_or(CallError::IncompatibleType)
-	}
-}
-
 impl ScriptType for Box<str> {
-	fn call(&self, _: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
 		todo!()
 	}
 
@@ -238,7 +242,7 @@ impl ScriptType for Box<str> {
 }
 
 impl ScriptType for char {
-	fn call(&self, _: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
 		todo!()
 	}
 
@@ -246,35 +250,21 @@ impl ScriptType for char {
 }
 
 impl ScriptType for String {
-	fn call(&self, _: &str, _: &[Rc<dyn ScriptType>]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
 		todo!()
 	}
 
 	impl_dup!();
 }
 
-impl ScriptIter for isize {
-	fn iter(&self) -> ScriptIterator {
-		if *self < 0 {
-			Box::new(
-				((-self + 1)..=0)
-					.rev()
-					.map(|i| Rc::new(i) as Rc<dyn ScriptType>),
-			)
-		} else {
-			Box::new((0..*self).map(|i| Rc::new(i) as Rc<dyn ScriptType>))
-		}
-	}
-}
-
 impl ScriptIter for Box<str> {
 	fn iter(&self) -> ScriptIterator {
-		Box::new(self.chars().map(|c| Rc::new(c) as Rc<dyn ScriptType>))
+		Box::new(self.chars().map(|c| Variant::Object(Rc::new(c))))
 	}
 }
 
 impl ScriptIter for String {
 	fn iter(&self) -> ScriptIterator {
-		Box::new(self.chars().map(|c| Rc::new(c) as Rc<dyn ScriptType>))
+		Box::new(self.chars().map(|c| Variant::Object(Rc::new(c))))
 	}
 }
