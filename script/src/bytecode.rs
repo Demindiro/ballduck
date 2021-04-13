@@ -1,13 +1,14 @@
-use unwrap_none::UnwrapNone;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::script::CallError;
 use crate::tokenizer::Op;
-use crate::{ScriptIter, ScriptType, ScriptObject, Variant};
+use crate::{ScriptIter, ScriptObject, ScriptType, Variant};
 use core::convert::TryInto;
 use core::fmt::{self, Debug, Formatter};
+use core::mem;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
+use unwrap_none::UnwrapNone;
 
 pub(crate) struct CallArgs {
 	store_in: Option<u16>,
@@ -19,9 +20,9 @@ pub(crate) enum Instruction {
 	Call(Box<(u16, CallArgs)>),
 	CallSelf(Box<CallArgs>),
 	CallGlobal(Box<CallArgs>),
-	//Iter(Box<dyn Iterator<Item = ScriptObject>>),
+
 	//Jmp(u32),
-	//JmpIf(u16, u32),
+	JmpIf(u16, u32),
 	RetSome,
 	RetNone,
 
@@ -33,22 +34,19 @@ pub(crate) enum Instruction {
 	AndJmp(u16, u16, u32),
 	OrJmp(u16, u16, u32),
 	Xor(u16, u16, u32),
-	Eq,
-	Neq,
 	*/
 	Add(u16, u16, u16),
-	//Sub(u16, u16, u16),
+	Sub(u16, u16, u16),
 	Mul(u16, u16, u16),
-	//Div(u16, u16, u16),
-	//Rem(u16, u16, u16),
+	Div(u16, u16, u16),
+	Rem(u16, u16, u16),
+
+	LessEq(u16, u16, u16),
+	Less(u16, u16, u16),
+	Neq(u16, u16, u16),
+	Eq(u16, u16, u16),
+
 	Move(u16, u16),
-	/*
-	AddConst,
-	SubConst,
-	MulConst,
-	DivConst,
-	RemConst,
-	*/
 }
 
 #[derive(Debug)]
@@ -83,7 +81,7 @@ pub struct Environment {
 }
 
 pub type EnvironmentFunction = Box<dyn Fn(&[Variant]) -> CallResult<RunError>>;
-pub type CallResult<E> = Result<Variant, E>;
+pub type CallResult<E = CallError> = Result<Variant, E>;
 
 #[derive(Debug)]
 pub enum EnvironmentError {
@@ -139,8 +137,16 @@ impl ByteCode {
 							conv(a);
 						}
 					}
-					Move(_, a) => conv(a),
-					Add(_, a, b) | Mul(_, a, b) => {
+					Move(_, a) | JmpIf(a, _) => conv(a),
+					Add(_, a, b)
+					| Sub(_, a, b)
+					| Mul(_, a, b)
+					| Div(_, a, b)
+					| Rem(_, a, b)
+					| Eq(_, a, b)
+					| Neq(_, a, b)
+					| Less(_, a, b)
+					| LessEq(_, a, b) => {
 						conv(a);
 						conv(b);
 					}
@@ -184,9 +190,9 @@ impl ByteCode {
 						};
 						args.push(match a {
 							Expression::Atom(a) => match a {
-								Atom::String(a) => {
-									add_const(Variant::Object(Rc::new(a.to_string().into_boxed_str())))
-								}
+								Atom::String(a) => add_const(Variant::Object(Rc::new(
+									a.to_string().into_boxed_str(),
+								))),
 								Atom::Integer(a) => add_const(Variant::Integer(*a)),
 								Atom::Real(a) => add_const(Variant::Real(*a)),
 								Atom::Name(a) => todo!("call {:?}", a),
@@ -204,12 +210,14 @@ impl ByteCode {
 									match a {
 										Expression::Atom(a) => {
 											args.push(match a {
-												Atom::String(a) => add_const(Variant::Object(Rc::new(
-													a.to_string().into_boxed_str(),
-												))),
+												Atom::String(a) => add_const(Variant::Object(
+													Rc::new(a.to_string().into_boxed_str()),
+												)),
 												Atom::Integer(a) => add_const(Variant::Integer(*a)),
 												Atom::Real(a) => add_const(Variant::Real(*a)),
-												Atom::Name(a) => todo!("call {:?}", a),
+												Atom::Name(a) => {
+													*vars.get(a).expect("TODO check for locals")
+												}
 											});
 										}
 										e => todo!("{:?}", e),
@@ -281,6 +289,41 @@ impl ByteCode {
 						_ => unreachable!(),
 					}
 				}
+				Statement::If { expr, lines } => {
+					let expr = Self::parse_expression(
+						*curr_var_count,
+						expr,
+						locals,
+						instr,
+						vars,
+						consts,
+						&mut min_var_count,
+						curr_var_count,
+					)?;
+					let expr = if let Some(expr) = expr {
+						expr
+					} else {
+						*curr_var_count += 1;
+						*curr_var_count - 1
+					};
+					instr.push(Instruction::JmpIf(expr, u32::MAX));
+					let ic = instr.len() - 1;
+					min_var_count = Self::parse_block(
+						lines,
+						methods,
+						locals,
+						instr,
+						vars,
+						consts,
+						curr_var_count,
+						min_var_count,
+					)?;
+					let ip = instr.len() as u32;
+					match instr.get_mut(ic) {
+						Some(Instruction::JmpIf(_, ic)) => *ic = ip,
+						i => unreachable!("{:?}", i),
+					}
+				}
 				Statement::Return { expr } => {
 					if let Some(expr) = expr {
 						let r = Self::parse_expression(
@@ -289,6 +332,7 @@ impl ByteCode {
 							locals,
 							instr,
 							vars,
+							consts,
 							&mut min_var_count,
 							&mut (vars.len() as u16),
 						)?;
@@ -300,7 +344,7 @@ impl ByteCode {
 						instr.push(Instruction::RetNone);
 					}
 				}
-				_ => todo!("{:?}", line),
+				_ => todo!("{:#?}", line),
 			}
 		}
 		min_var_count = min_var_count.max(vars.len() as u16);
@@ -316,9 +360,14 @@ impl ByteCode {
 		locals: &FxHashMap<Box<str>, u16>,
 		instr: &mut Vec<Instruction>,
 		vars: &FxHashMap<&str, u16>,
+		consts: &mut Vec<Variant>,
 		min_var_count: &mut u16,
 		curr_var_count: &mut u16,
 	) -> Result<Option<u16>, ByteCodeError> {
+		let mut add_const = |v| {
+			consts.push(v);
+			u16::MAX - consts.len() as u16 + 1
+		};
 		match expr {
 			Expression::Operation { left, op, right } => {
 				let og_cvc = *curr_var_count;
@@ -331,6 +380,7 @@ impl ByteCode {
 					locals,
 					instr,
 					vars,
+					consts,
 					min_var_count,
 					curr_var_count,
 				)?;
@@ -346,13 +396,23 @@ impl ByteCode {
 					locals,
 					instr,
 					vars,
+					consts,
 					min_var_count,
 					curr_var_count,
 				)?;
 				let right = if let Some(r) = or_right { r } else { r_right };
 				instr.push(match op {
 					Op::Add => Instruction::Add(store, left, right),
+					Op::Sub => Instruction::Sub(store, left, right),
 					Op::Mul => Instruction::Mul(store, left, right),
+					Op::Div => Instruction::Div(store, left, right),
+					Op::Rem => Instruction::Rem(store, left, right),
+					Op::Eq => Instruction::Eq(store, left, right),
+					Op::Neq => Instruction::Neq(store, left, right),
+					Op::Less => Instruction::Less(store, left, right),
+					Op::Greater => Instruction::Less(store, right, left),
+					Op::LessEq => Instruction::LessEq(store, left, right),
+					Op::GreaterEq => Instruction::LessEq(store, right, left),
 					o => todo!("{:?}", o),
 				});
 				*curr_var_count = og_cvc;
@@ -366,6 +426,7 @@ impl ByteCode {
 						return Err(ByteCodeError::UndefinedVariable);
 					}
 				}
+				&Atom::Integer(i) => Ok(Some(add_const(Variant::Integer(i)))),
 				a => todo!("{:?}", a),
 			},
 			Expression::Function {
@@ -373,24 +434,24 @@ impl ByteCode {
 				name,
 				arguments,
 			} => {
-				let expr = if let Some(e) = expr {
-					e
-				} else {
-					todo!("none expr in fn")
-				};
 				let og_cvc = *curr_var_count;
-				let r = *curr_var_count;
-				*curr_var_count += 1;
-				let e = Self::parse_expression(
-					r,
-					expr,
-					locals,
-					instr,
-					vars,
-					min_var_count,
-					curr_var_count,
-				)?;
-				let expr = if let Some(e) = e { e } else { r };
+				let expr = if let Some(expr) = expr {
+					let r = *curr_var_count;
+					*curr_var_count += 1;
+					let e = Self::parse_expression(
+						r,
+						expr,
+						locals,
+						instr,
+						vars,
+						consts,
+						min_var_count,
+						curr_var_count,
+					)?;
+					Some(if let Some(e) = e { e } else { r })
+				} else {
+					None
+				};
 				let mut args = Vec::with_capacity(arguments.len());
 				for a in arguments {
 					let r = *curr_var_count;
@@ -401,6 +462,7 @@ impl ByteCode {
 						locals,
 						instr,
 						vars,
+						consts,
 						min_var_count,
 						curr_var_count,
 					)?;
@@ -416,7 +478,11 @@ impl ByteCode {
 					func: (*name).into(),
 					args: args.into_boxed_slice(),
 				};
-				instr.push(Instruction::Call(Box::new((expr, ca))));
+				instr.push(if let Some(expr) = expr {
+					Instruction::Call(Box::new((expr, ca)))
+				} else {
+					Instruction::CallSelf(Box::new(ca))
+				});
 				*curr_var_count = og_cvc;
 				Ok(None)
 			}
@@ -516,9 +582,11 @@ impl ByteCode {
 					}
 					IterInt(reg, i) => {
 						let mut iter = if *i < 0 {
-							Box::new(((1 - i)..=0).rev().map(Variant::Integer)) as Box<dyn Iterator<Item = Variant>>
+							Box::new(((1 - i)..=0).rev().map(Variant::Integer))
+								as Box<dyn Iterator<Item = Variant>>
 						} else {
-							Box::new((0..*i).map(Variant::Integer)) as Box<dyn Iterator<Item = Variant>>
+							Box::new((0..*i).map(Variant::Integer))
+								as Box<dyn Iterator<Item = Variant>>
 						};
 						*vars.get_mut(*reg as usize).ok_or(err_roob())? = iter.next().unwrap();
 						iterators.push(iter);
@@ -533,48 +601,41 @@ impl ByteCode {
 							return Err(RunError::NoIterator);
 						}
 					}
-					Mul(r, a, b) => {
-						let a = vars.get(*a as usize).ok_or(err_roob())?;
-						let b = vars.get(*b as usize).ok_or(err_roob())?;
-						let err = || Err(RunError::IncompatibleType);
-						let e = match a {
-							Variant::None => return err(),
-							Variant::Real(a) => match b {
-								Variant::None => return err(),
-								Variant::Real(b) => Variant::Real(a * b),
-								&Variant::Integer(b) => Variant::Real(a * b as f64),
-								Variant::Object(_) => return err(),
+					JmpIf(reg, jmp_ip) => {
+						if let Variant::Bool(b) = vars.get(*reg as usize).ok_or(err_roob())? {
+							if !b {
+								ip = *jmp_ip;
 							}
-							&Variant::Integer(a) => match b {
-								Variant::None => return err(),
-								Variant::Real(b) => Variant::Real(a as f64 * b),
-								Variant::Integer(b) => Variant::Integer(a * b),
-								Variant::Object(_) => return err(),
-							}
-							Variant::Object(_) => return err(),
-						};
+						} else {
+							return Err(RunError::NoIterator);
+						}
+					}
+					Move(r, a) => {
+						let e = mem::take(vars.get_mut(*a as usize).ok_or(err_roob())?);
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
 					Add(r, a, b) => {
 						let a = vars.get(*a as usize).ok_or(err_roob())?;
 						let b = vars.get(*b as usize).ok_or(err_roob())?;
-						let err = || Err(RunError::IncompatibleType);
-						let e = match a {
-							Variant::None => return err(),
-							Variant::Real(a) => match b {
-								Variant::None => return err(),
-								Variant::Real(b) => Variant::Real(a + b),
-								&Variant::Integer(b) => Variant::Real(a + b as f64),
-								Variant::Object(_) => return err(),
-							}
-							&Variant::Integer(a) => match b {
-								Variant::None => return err(),
-								Variant::Real(b) => Variant::Real(a as f64 + b),
-								Variant::Integer(b) => Variant::Integer(a + b),
-								Variant::Object(_) => return err(),
-							}
-							Variant::Object(_) => return err(),
-						};
+						let e = (a + b).map_err(err_call)?;
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Sub(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = (a - b).map_err(err_call)?;
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Mul(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = (a * b).map_err(err_call)?;
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					LessEq(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = Variant::Bool(a <= b);
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
 					_ => todo!("{:?}", instr),
@@ -630,8 +691,18 @@ impl Debug for Instruction {
 			IterConst(box (r, p, i)) => write!(f, "iter    {}, {}, {:?}", r, p, i),
 			IterInt(r, i) => write!(f, "iter    {}, {}", r, i),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
+			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
+
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
+			Sub(r, a, b) => write!(f, "sub     {}, {}, {}", r, a, b),
 			Mul(r, a, b) => write!(f, "mul     {}, {}, {}", r, a, b),
+			Div(r, a, b) => write!(f, "div     {}, {}, {}", r, a, b),
+			Rem(r, a, b) => write!(f, "rem     {}, {}, {}", r, a, b),
+
+			Eq(r, a, b) => write!(f, "eq      {}, {}, {}", r, a, b),
+			Neq(r, a, b) => write!(f, "neq     {}, {}, {}", r, a, b),
+			Less(r, a, b) => write!(f, "less    {}, {}, {}", r, a, b),
+			LessEq(r, a, b) => write!(f, "lesseq  {}, {}, {}", r, a, b),
 		}
 	}
 }

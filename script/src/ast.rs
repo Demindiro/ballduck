@@ -37,6 +37,10 @@ pub(crate) enum Statement<'src> {
 		expr: Expression<'src>,
 		lines: Lines<'src>,
 	},
+	If {
+		expr: Expression<'src>,
+		lines: Lines<'src>,
+	},
 	Return {
 		expr: Option<Expression<'src>>,
 	},
@@ -53,7 +57,6 @@ pub(crate) enum Atom<'src> {
 #[derive(Debug)]
 pub(crate) enum Expression<'src> {
 	Atom(Atom<'src>),
-	Name(&'src str),
 	Operation {
 		op: Op,
 		left: Box<Expression<'src>>,
@@ -228,33 +231,49 @@ impl<'src> Function<'src> {
 						Some((tk, ..)) => Expression::parse(tk, tokens)?,
 						None => err!(UnexpectedEOF, line, column),
 					};
-					if let Some(Token::Indent(expected_indent)) = tk {
-						lines.push(Statement::For {
-							var,
-							expr,
-							lines: Self::parse_block(tokens, expected_indent, ll, lc)?.0,
-						});
-					} else {
-						err!(UnexpectedToken, tk, 0, 0);
+					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1, ll, lc)?;
+					lines.push(Statement::For {
+						var,
+						expr,
+						lines: blk,
+					});
+					if indent < expected_indent {
+						return Ok((lines, indent));
+					}
+				}
+				Some((Token::If, ll, lc)) => {
+					let (expr, tk) = match tokens.next() {
+						Some((tk, ..)) => Expression::parse(tk, tokens)?,
+						None => err!(UnexpectedEOF, ll, lc),
+					};
+					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1, ll, lc)?;
+					lines.push(Statement::If { expr, lines: blk });
+					if indent < expected_indent {
+						return Ok((lines, indent));
 					}
 				}
 				Some((Token::Pass, ..)) => (),
 				Some((Token::Return, l, c)) => {
 					if let Some((tk, l, c)) = tokens.next() {
-						let expr = match Expression::parse(tk, tokens) {
-							Ok(expr) => Some(expr.0),
+						let (expr, tk) = match Expression::parse(tk, tokens) {
+							Ok((expr, tk)) => (Some(expr), tk),
 							e => todo!("{:?}", e),
 						};
 						lines.push(Statement::Return { expr });
+						if let Some(Token::Indent(i)) = tk {
+							if i < expected_indent {
+								return Ok((lines, i));
+							}
+						}
 					} else {
 						err!(UnexpectedEOF, l, c);
 					}
 				}
-				Some((Token::Indent(0), ..)) | None => return Ok((lines, 0)),
-				Some((Token::Indent(i), ..)) if i < expected_indent => return Ok((lines, 0)),
+				None => return Ok((lines, 0)),
+				Some((Token::Indent(i), ..)) if i < expected_indent => return Ok((lines, i)),
 				Some((Token::Indent(i), ..)) if i == expected_indent => (),
 				Some((Token::Indent(i), l, c)) => err!(UnexpectedIndent, i, l, c),
-				Some((tk, ..)) => todo!("{:?}", tk),
+				tk => todo!("{:?}", tk),
 			};
 		}
 	}
@@ -265,139 +284,137 @@ impl<'src> Expression<'src> {
 		pre: Token<'src>,
 		tokens: &mut impl Iterator<Item = (Token<'src>, u32, u32)>,
 	) -> Result<(Self, Option<Token<'src>>), Error> {
+		let expr_op = |left, op, right| Expression::Operation {
+			left: Box::new(left),
+			op,
+			right: Box::new(right),
+		};
+		let expr_fn = |expr: Option<_>, name, arguments| Expression::Function {
+			expr: expr.map(Box::new),
+			name,
+			arguments,
+		};
+		let expr_num = |n, l, c, sl| {
+			if let Ok(n) = parse_number(n) {
+				Ok(Expression::Atom(n))
+			} else {
+				Error::new(ErrorType::NotANumber, l, c, sl)
+			}
+		};
+		let expr_name = |n| Expression::Atom(Atom::Name(n));
+		fn parse_fn_args<'src>(
+			tokens: &mut impl Iterator<Item = TokenGroup<'src>>,
+			sl: u32,
+		) -> Result<Vec<Expression<'src>>, Error> {
+			let expr_num = |n, l, c, sl| {
+				if let Ok(n) = parse_number(n) {
+					Ok(Expression::Atom(n))
+				} else {
+					Error::new(ErrorType::NotANumber, l, c, sl)
+				}
+			};
+			let expr_name = |n| Expression::Atom(Atom::Name(n));
+			let mut args = Vec::new();
+			loop {
+				let tk = match tokens.next() {
+					Some((Token::BracketRoundClose, ..)) => break,
+					Some((tk, l, c)) => {
+						let (expr, tk) = Expression::parse(tk, tokens)?;
+						args.push(expr);
+						tk.map(|tk| (tk, l, c)).or_else(|| tokens.next())
+					}
+					//Some((Token::Number(n), l, c)) => args.push(expr_num(n, l, c, sl)?),
+					//Some((Token::Name(n), ..)) => args.push(expr_name(n)),
+					e => todo!("{:?}", e),
+				};
+				match tk {
+					Some((Token::Comma, ..)) => (),
+					Some((Token::BracketRoundClose, ..)) => break,
+					Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
+					tk => {
+						dbg!(tk, args);
+						todo!()
+					}
+					None => err!(UnexpectedEOF, 0, 0),
+				}
+			}
+			Ok(args)
+		}
+
 		let (lhs, last_tk) = match pre {
 			Token::BracketRoundOpen => match tokens.next() {
 				Some((pre, ..)) => Self::parse(pre, tokens).map(|(e, t)| (e, t))?,
 				None => err!(UnexpectedEOF, 0, 0),
 			},
 			Token::String(s) => (Expression::Atom(Atom::String(s)), None),
-			Token::Number(n) => (
-				Expression::Atom(if let Ok(n) = parse_integer(n) {
-					n
-				} else {
-					err!(NotANumber, 0, 0);
-				}),
-				None,
-			),
+			Token::Number(n) => (expr_num(n, 0, 0, line!())?, None),
 			Token::Name(name) => match tokens.next() {
 				Some((Token::BracketRoundOpen, ..)) => {
-					let mut arguments = Vec::new();
-					loop {
-						match tokens.next() {
-							Some((Token::Number(n), l, c)) => {
-								if let Ok(n) = parse_integer(n) {
-									arguments.push(Expression::Atom(n));
-								} else {
-									err!(NotANumber, l, c);
-								}
-							}
-							e => todo!("{:?}", e),
-						}
-						match tokens.next() {
-							Some((Token::Comma, ..)) => (),
-							Some((Token::BracketRoundClose, ..)) => break,
-							Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-							None => err!(UnexpectedEOF, 0, 0),
-						}
-					}
-					let expr = None;
-					(
-						Expression::Function {
-							expr,
-							name,
-							arguments,
-						},
-						None,
-					)
+					(expr_fn(None, name, parse_fn_args(tokens, line!())?), None)
 				}
-				Some((tk, ..)) => (Expression::Atom(Atom::Name(name)), Some(tk)),
+				Some((tk, ..)) => (expr_name(name), Some(tk)),
 				e => todo!("{:?}", e),
 			},
 			e => todo!("{:?}", e),
 		};
+
 		if let Some(last_tk) = last_tk {
 			match last_tk {
 				Token::Op(opl) => match tokens.next() {
 					Some((Token::Name(mid), ..)) => {
 						let og_mid = mid;
-						let mid = Expression::Atom(Atom::Name(mid));
+						let mid = expr_name(mid);
 						match tokens.next() {
 							Some((Token::Op(opr), ..)) => match tokens.next() {
 								Some((Token::Name(rhs), ..)) => {
 									let (left, op, right) = if opl >= opr {
 										let rhs = Expression::parse(Token::Name(rhs), tokens)?.0;
-										let lhs = Expression::Operation {
-											op: opl,
-											left: Box::new(lhs),
-											right: Box::new(mid),
-										};
+										let lhs = expr_op(lhs, opl, mid);
 										(lhs, opr, rhs)
 									} else {
-										let rhs = Expression::Atom(Atom::Name(rhs));
-										let rhs = Expression::Operation {
-											op: opr,
-											left: Box::new(mid),
-											right: Box::new(rhs),
-										};
+										let rhs = expr_op(mid, opr, expr_name(rhs));
 										(lhs, opl, rhs)
 									};
-									let (left, right) = (Box::new(left), Box::new(right));
-									Ok((
-										Expression::Operation { left, op, right },
-										tokens.next().map(|v| v.0),
-									))
+									Ok((expr_op(left, op, right), tokens.next().map(|v| v.0)))
 								}
 								e => todo!("{:?}", e),
 							},
 							Some((Token::BracketRoundOpen, ..)) => {
-								// FIXME handle function args & check for ending brace
-								tokens.next();
+								let args = parse_fn_args(tokens, line!())?;
 								match opl {
 									Op::Access => Ok((
-										Expression::Function {
-											expr: Some(Box::new(lhs)),
-											name: og_mid,
-											arguments: Vec::new(),
-										},
+										expr_fn(Some(lhs), og_mid, args),
 										Some(Token::BracketRoundClose),
 									)),
-									e => todo!("{:?}", e),
+									op => Ok((
+										expr_op(lhs, op, expr_fn(None, og_mid, args)),
+										Some(Token::BracketRoundClose),
+									)),
 								}
 							}
 							Some((tk, ..))
 								if tk == Token::BracketRoundClose || tk == Token::Indent(0) =>
 							{
-								Ok((
-									Expression::Operation {
-										left: Box::new(lhs),
-										op: opl,
-										right: Box::new(mid),
-									},
-									Some(tk),
-								))
+								Ok((expr_op(lhs, opl, mid), Some(tk)))
 							}
-							None => Ok((
-								Expression::Operation {
-									left: Box::new(lhs),
-									op: opl,
-									right: Box::new(mid),
-								},
-								None,
-							)),
+							None => Ok((expr_op(lhs, opl, mid), None)),
 							e => todo!("{:?}", e),
 						}
 					}
+					Some((Token::Number(n), l, c)) => {
+						Ok((expr_op(lhs, opl, expr_num(n, l, c, line!())?), None))
+					}
 					e => todo!("{:?}", e),
 				},
-				e => todo!("{:?}", e),
+				// FIXME is this correct?
+				Token::BracketRoundClose => Ok((lhs, Some(Token::BracketRoundClose))),
+				e => todo!("{:?} ------ {:?}", e, lhs),
 			}
 		} else {
 			match tokens.next() {
-				Some((Token::BracketRoundClose, ..)) => {
-					return Ok((lhs, Some(Token::BracketRoundClose)))
-				}
-				Some((Token::Comma, ..)) => return Ok((lhs, Some(Token::Comma))),
-				Some((Token::Indent(i), ..)) => return Ok((lhs, Some(Token::Indent(i)))),
+				Some((Token::BracketRoundClose, ..)) => Ok((lhs, Some(Token::BracketRoundClose))),
+				Some((Token::Comma, ..)) => Ok((lhs, Some(Token::Comma))),
+				Some((Token::Indent(i), ..)) => Ok((lhs, Some(Token::Indent(i)))),
 				e => todo!("{:?}", e),
 			}
 		}
@@ -424,7 +441,7 @@ enum NumberParseError {
 }
 
 /// Custom number parsing function that allows underscores
-fn parse_integer(s: &str) -> Result<Atom, NumberParseError> {
+fn parse_number(s: &str) -> Result<Atom, NumberParseError> {
 	let mut chars = s.chars();
 	let (mut chars, base) = if chars.next() == Some('0') {
 		if let Some(c) = chars.next() {
@@ -500,23 +517,23 @@ mod test {
 
 	#[test]
 	fn number() {
-		assert_eq!(parse_integer("0"), Ok(Atom::Integer(0)));
-		assert_eq!(parse_integer("32"), Ok(Atom::Integer(32)));
-		assert_eq!(parse_integer("0.0"), Ok(Atom::Real(0.0)));
-		match parse_integer("13.37") {
+		assert_eq!(parse_number("0"), Ok(Atom::Integer(0)));
+		assert_eq!(parse_number("32"), Ok(Atom::Integer(32)));
+		assert_eq!(parse_number("0.0"), Ok(Atom::Real(0.0)));
+		match parse_number("13.37") {
 			Ok(Atom::Real(f)) => assert!((f - 13.37).abs() <= Real::EPSILON * 13.37),
 			r => panic!("{:?}", r),
 		}
 		assert_eq!(
-			parse_integer("."),
+			parse_number("."),
 			Err(NumberParseError::SeparatorInWrongPosition)
 		);
 		assert_eq!(
-			parse_integer("0."),
+			parse_number("0."),
 			Err(NumberParseError::SeparatorInWrongPosition)
 		);
 		assert_eq!(
-			parse_integer(".0"),
+			parse_number(".0"),
 			Err(NumberParseError::SeparatorInWrongPosition)
 		);
 	}

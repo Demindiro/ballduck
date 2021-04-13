@@ -9,7 +9,7 @@ mod tokenizer;
 
 use rustc_hash::FxHashMap;
 use script::Script;
-pub use script::{Class, ScriptIter, ScriptType, ScriptObject, Variant};
+pub use script::{Class, ScriptIter, ScriptObject, ScriptType, Variant};
 
 use bytecode::ByteCode;
 use tokenizer::TokenStream;
