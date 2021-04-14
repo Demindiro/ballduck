@@ -3,13 +3,11 @@ use crate::tokenizer::*;
 type Integer = isize;
 type Real = f64;
 
-#[derive(Debug)]
 pub(crate) struct Script<'src> {
 	pub functions: Vec<Function<'src>>,
 	pub variables: Vec<&'src str>,
 }
 
-#[derive(Debug)]
 pub(crate) struct Function<'src> {
 	pub name: &'src str,
 	pub parameters: Vec<&'src str>,
@@ -83,7 +81,6 @@ pub enum ErrorType {
 	UnexpectedToken(String),
 	ExpectedToken(String),
 	UnexpectedEOF,
-	Noop,
 	NotANumber,
 }
 
@@ -100,7 +97,7 @@ macro_rules! err {
 	(ExpectedToken, $err_val:expr, $tokens:ident) => {{
 		let tk = format!("{:?}", $err_val);
 		let (l, c) = $tokens.position();
-		return Error::new(ErrorType::UnexpectedToken(tk), l, c, line!());
+		return Error::new(ErrorType::ExpectedToken(tk), l, c, line!());
 	}};
 	($err:ident, $err_val:expr, $tokens:ident) => {{
 		let (l, c) = $tokens.position();
@@ -185,7 +182,7 @@ impl<'src> Function<'src> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
-				Some(Token::Name(name)) => match tokens.next() {
+				Some(Token::Name(_)) => match tokens.next() {
 					Some(Token::BracketRoundOpen) => {
 						tokens.prev();
 						tokens.prev();
@@ -217,7 +214,11 @@ impl<'src> Function<'src> {
 				Some(Token::If) => {
 					let expr = Expression::parse(tokens)?;
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
-					lines.push(Statement::If { expr, lines: blk, else_lines: None });
+					lines.push(Statement::If {
+						expr,
+						lines: blk,
+						else_lines: None,
+					});
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
@@ -226,7 +227,11 @@ impl<'src> Function<'src> {
 						if tk == Token::Elif {
 							let expr = Expression::parse(tokens)?;
 							let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
-							let if_blk = Vec::from([Statement::If { expr, lines: blk, else_lines: None }]);
+							let if_blk = Vec::from([Statement::If {
+								expr,
+								lines: blk,
+								else_lines: None,
+							}]);
 							prev_blk = match prev_blk.last_mut().unwrap() {
 								Statement::If { else_lines, .. } => {
 									*else_lines = Some(if_blk);
@@ -295,13 +300,12 @@ impl<'src> Expression<'src> {
 		let expr_name = |n| Expression::Atom(Atom::Name(n));
 		fn parse_fn_args<'src>(
 			tokens: &mut TokenStream<'src>,
-			sl: u32,
 		) -> Result<Vec<Expression<'src>>, Error> {
 			let mut args = Vec::new();
 			loop {
 				match tokens.next() {
 					Some(Token::BracketRoundClose) => break,
-					Some(tk) => {
+					Some(_) => {
 						tokens.prev();
 						let expr = Expression::parse(tokens)?;
 						args.push(expr);
@@ -311,12 +315,14 @@ impl<'src> Expression<'src> {
 				match tokens.next() {
 					Some(Token::Comma) => (),
 					Some(Token::BracketRoundClose) => break,
-					Some(tk) => { dbg!(tk); todo!() },//err!(UnexpectedToken, tk, tokens),
+					Some(tk) => {
+						dbg!(tk);
+						todo!()
+					} //err!(UnexpectedToken, tk, tokens),
 					tk => {
 						dbg!(tk, args);
 						todo!()
 					}
-					None => err!(UnexpectedEOF, tokens),
 				}
 			}
 			Ok(args)
@@ -333,9 +339,7 @@ impl<'src> Expression<'src> {
 			Some(Token::String(s)) => Self::Atom(Atom::String(s)),
 			Some(Token::Number(n)) => expr_num(n, tokens, line!())?,
 			Some(Token::Name(name)) => match tokens.next() {
-				Some(Token::BracketRoundOpen) => {
-					expr_fn(None, name, parse_fn_args(tokens, line!())?)
-				}
+				Some(Token::BracketRoundOpen) => expr_fn(None, name, parse_fn_args(tokens)?),
 				Some(_) => {
 					tokens.prev();
 					expr_name(name)
@@ -364,7 +368,7 @@ impl<'src> Expression<'src> {
 								e => todo!("{:?}", e),
 							},
 							Some(Token::BracketRoundOpen) => {
-								let args = parse_fn_args(tokens, line!())?;
+								let args = parse_fn_args(tokens)?;
 								match opl {
 									Op::Access => Ok(expr_fn(Some(lhs), og_mid, args)),
 									op => Ok(expr_op(lhs, op, expr_fn(None, og_mid, args))),
@@ -397,7 +401,7 @@ impl<'src> Expression<'src> {
 								tokens,
 							),
 							e => todo!("{:?}", e),
-						}
+						},
 						Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 							tokens.prev();
 							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
@@ -477,7 +481,7 @@ enum NumberParseError {
 /// Custom number parsing function that allows underscores
 fn parse_number(s: &str) -> Result<Atom, NumberParseError> {
 	let mut chars = s.chars();
-	let (mut chars, base) = if chars.next() == Some('0') {
+	let (chars, base) = if chars.next() == Some('0') {
 		if let Some(c) = chars.next() {
 			if let Some(b) = match c {
 				'x' => Some(16),

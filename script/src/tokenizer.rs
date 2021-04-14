@@ -9,6 +9,8 @@ pub enum Op {
 	Or,
 	Xor,
 	Not,
+	AndThen,
+	OrElse,
 	Eq,
 	Neq,
 	LessEq,
@@ -64,7 +66,6 @@ pub enum Token<'src> {
 pub enum TokenError {
 	Empty,
 	UnterminatedString,
-	InvalidOp,
 	InvalidAssignOp,
 	SpaceInIndent,
 	IndentationOverflow,
@@ -95,6 +96,7 @@ impl Op {
 			Or => 5,
 			Less | Greater | LessEq | GreaterEq => 4,
 			Eq | Neq => 3,
+			AndThen | OrElse => 2,
 		}
 	}
 }
@@ -111,7 +113,7 @@ impl Token<'_> {
 
 	fn parse(source: &str, start_of_file: bool) -> Result<(Token, u32), TokenError> {
 		let mut chars = source.char_indices().map(|(i, c)| (i as u32, c)).peekable();
-		'chr: while let Some((start, c)) = chars.next() {
+		while let Some((start, c)) = chars.next() {
 			return match c {
 				'#' => {
 					while chars.peek() != None && chars.peek().map(|v| v.1) != Some('\n') {
@@ -127,7 +129,7 @@ impl Token<'_> {
 							return match chars.next() {
 								Some((_, '\t')) => continue,
 								Some((_, ' ')) => Err(TokenError::SpaceInIndent),
-								Some(r) => Ok((Token::Indent(i), start + (i + 1 - s) as u32)),
+								Some(_) => Ok((Token::Indent(i), start + (i + 1 - s) as u32)),
 								None => Err(TokenError::Empty),
 							};
 						}
@@ -154,7 +156,7 @@ impl Token<'_> {
 					}
 				},
 				_ if Self::OPERATORS.contains(c) => {
-					if let Some((i, n)) = chars.next() {
+					if let Some(&(i, n)) = chars.peek() {
 						if n == '=' {
 							let i = i + 1;
 							return match c {
@@ -174,6 +176,21 @@ impl Token<'_> {
 							};
 						}
 					}
+					let cn = chars.peek().map(|v| v.1);
+					let either2 = |c, y, n| {
+						if cn == Some(c) {
+							(Token::Op(y), start + 2)
+						} else {
+							(Token::Op(n), start + 1)
+						}
+					};
+					let either3 = |c1, y1, c2, y2, n| {
+						if cn == Some(c1) {
+							(Token::Op(y1), start + 2)
+						} else {
+							either2(c2, y2, n)
+						}
+					};
 					let i = start + 1;
 					match c {
 						'+' => Ok((Token::Op(Op::Add), i)),
@@ -181,12 +198,18 @@ impl Token<'_> {
 						'*' => Ok((Token::Op(Op::Mul), i)),
 						'/' => Ok((Token::Op(Op::Div), i)),
 						'%' => Ok((Token::Op(Op::Rem), i)),
-						'&' => Ok((Token::Op(Op::And), i)),
-						'|' => Ok((Token::Op(Op::Or), i)),
+						'&' => Ok(either2('&', Op::AndThen, Op::And)),
+						'|' => Ok(either2('|', Op::OrElse, Op::Or)),
 						'^' => Ok((Token::Op(Op::Xor), i)),
 						'=' => Ok((Token::Assign(AssignOp::None), i)),
-						'<' => Ok((Token::Op(Op::Less), i)),
-						'>' => Ok((Token::Op(Op::Greater), i)),
+						'<' => Ok(either3('<', Op::ShiftLeft, '=', Op::LessEq, Op::Less)),
+						'>' => Ok(either3(
+							'>',
+							Op::ShiftRight,
+							'=',
+							Op::GreaterEq,
+							Op::Greater,
+						)),
 						'!' => Ok((Token::Op(Op::Not), i)),
 						'.' => Ok((Token::Op(Op::Access), i)),
 						c => unreachable!("operator '{}' not covered", c),

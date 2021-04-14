@@ -1,3 +1,4 @@
+#![allow(unstable_name_collisions)] // `unwrap_none` and `expect_none` are removed
 #![feature(box_patterns)]
 
 use unwrap_none::UnwrapNone;
@@ -6,12 +7,14 @@ mod ast;
 mod bytecode;
 mod script;
 mod tokenizer;
+mod variant;
 
 use rustc_hash::FxHashMap;
 use script::Script;
-pub use script::{Class, ScriptIter, ScriptObject, ScriptType, Variant};
+pub use script::{CallError, Class, ScriptIter, ScriptObject, ScriptType};
+pub use variant::Variant;
 
-use bytecode::ByteCode;
+use bytecode::ByteCodeBuilder;
 use tokenizer::TokenStream;
 
 pub fn parse(source: &str) -> Result<Class, ()> {
@@ -39,7 +42,7 @@ pub fn parse(source: &str) -> Result<Class, ()> {
 	}
 	for f in ast.functions {
 		let name = f.name.into();
-		match ByteCode::parse(f, &methods, &script.locals) {
+		match ByteCodeBuilder::parse(f, &methods, &script.locals) {
 			Ok(f) => {
 				script.functions.insert(name, f);
 			}

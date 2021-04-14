@@ -1,31 +1,13 @@
 use crate::bytecode::{ByteCode, CallResult, Environment, RunError};
+use crate::Variant;
 use core::any::{Any, TypeId};
-use core::cmp;
 use core::fmt::Debug;
-use core::ops::{Add, Mul, Sub, Rem, Div};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct Class(Arc<Script>);
-
-#[derive(Clone, Debug)]
-/// Variant type that encodes a few common types. Having the common types
-/// not be hidden behind a dyn trait improves performance greatly
-pub enum Variant {
-	None,
-	Bool(bool),
-	Real(f64),
-	Integer(isize),
-	Object(ScriptObject),
-}
-
-impl Default for Variant {
-	fn default() -> Self {
-		Variant::None
-	}
-}
 
 pub type ScriptObject = Rc<dyn ScriptType>;
 
@@ -109,180 +91,11 @@ impl dyn ScriptType + 'static {
 	}
 }
 
-macro_rules! err_op {
-	() => {
-		return Err(CallError::IncompatibleType);
-	};
-}
-
-impl Add<Self> for &Variant {
-	type Output = CallResult;
-
-	#[inline]
-	fn add(self, rhs: Self) -> Self::Output {
-		Ok(match self {
-			Variant::Real(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a + b),
-				&Variant::Integer(b) => Variant::Real(a + b as f64),
-				_ => err_op!(),
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a as f64 + b),
-				Variant::Integer(b) => Variant::Integer(a + b),
-				_ => err_op!(),
-			},
-			_ => err_op!(),
-		})
-	}
-}
-
-impl Sub<Self> for &Variant {
-	type Output = CallResult;
-
-	#[inline]
-	fn sub(self, rhs: Self) -> Self::Output {
-		Ok(match self {
-			Variant::Real(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a - b),
-				&Variant::Integer(b) => Variant::Real(a - b as f64),
-				_ => err_op!(),
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a as f64 - b),
-				Variant::Integer(b) => Variant::Integer(a - b),
-				_ => err_op!(),
-			},
-			_ => err_op!(),
-		})
-	}
-}
-
-impl Mul<Self> for &Variant {
-	type Output = CallResult;
-
-	#[inline]
-	fn mul(self, rhs: Self) -> Self::Output {
-		Ok(match self {
-			Variant::Real(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a * b),
-				&Variant::Integer(b) => Variant::Real(a * b as f64),
-				_ => err_op!(),
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a as f64 * b),
-				Variant::Integer(b) => Variant::Integer(a * b),
-				_ => err_op!(),
-			},
-			_ => err_op!(),
-		})
-	}
-}
-
-impl Div<Self> for &Variant {
-	type Output = CallResult;
-
-	#[inline]
-	fn div(self, rhs: Self) -> Self::Output {
-		// FIXME handle division by 0 for integers
-		Ok(match self {
-			Variant::Real(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a / b),
-				&Variant::Integer(b) => Variant::Real(a / b as f64),
-				_ => err_op!(),
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a as f64 / b),
-				Variant::Integer(b) => Variant::Integer(a / b),
-				_ => err_op!(),
-			},
-			_ => err_op!(),
-		})
-	}
-}
-
-impl Rem<Self> for &Variant {
-	type Output = CallResult;
-
-	#[inline]
-	fn rem(self, rhs: Self) -> Self::Output {
-		// FIXME handle division by 0 for integers
-		Ok(match self {
-			Variant::Real(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a % b),
-				&Variant::Integer(b) => Variant::Real(a % b as f64),
-				_ => err_op!(),
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => Variant::Real(a as f64 % b),
-				Variant::Integer(b) => Variant::Integer(a % b),
-				_ => err_op!(),
-			},
-			_ => err_op!(),
-		})
-	}
-}
-
-impl PartialEq<Self> for Variant {
-	#[inline]
-	// FIXME should we return bool or should we implement a custom form
-	// of PartialEq that returns a Result?
-	fn eq(&self, rhs: &Self) -> bool {
-		match self {
-			&Variant::Bool(a) => match rhs {
-				&Variant::Bool(b) => a == b,
-				_ => false,
-			},
-			&Variant::Real(a) => match rhs {
-				&Variant::Real(b) => a == b,
-				&Variant::Integer(b) => a == b as f64,
-				_ => false,
-			},
-			&Variant::Integer(a) => match rhs {
-				&Variant::Real(b) => a as f64 == b,
-				&Variant::Integer(b) => a == b,
-				_ => false,
-			},
-			_ => false,
-		}
-	}
-}
-
-impl PartialOrd<Self> for Variant {
-	#[inline]
-	fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
-		match self {
-			&Variant::Bool(a) => match rhs {
-				Variant::Bool(b) => a.partial_cmp(b),
-				_ => None,
-			},
-			&Variant::Real(a) => match rhs {
-				Variant::Real(b) => a.partial_cmp(b),
-				Variant::Integer(b) => a.partial_cmp(&(*b as f64)),
-				_ => None,
-			},
-			&Variant::Integer(a) => match rhs {
-				Variant::Real(b) => (a as f64).partial_cmp(b),
-				Variant::Integer(b) => a.partial_cmp(b),
-				_ => None,
-			},
-			_ => None,
-		}
-	}
-}
-
 /// Regular ol' clone doesn't work because of [`Sized`] stuff, so this exists
 macro_rules! impl_dup {
 	() => {
 		fn dup(&self) -> ScriptObject {
 			Rc::new(self.clone()) as ScriptObject
-		}
-	};
-}
-
-macro_rules! check_arg_count {
-	($args:ident, $count:expr) => {
-		if $args.len() != $count {
-			return Err(CallError::BadArgumentCount);
 		}
 	};
 }
@@ -293,35 +106,12 @@ pub trait ScriptIter: Debug {
 
 pub type ScriptIterator<'a> = Box<dyn Iterator<Item = Variant> + 'a>;
 
-impl Variant {
-	pub fn call(&self, function: &str, args: &[Variant]) -> Result<Variant, CallError> {
-		match self {
-			Variant::None => Err(CallError::IsEmpty),
-			Variant::Bool(_) => Err(CallError::UndefinedFunction),
-			Variant::Real(r) => match function {
-				"sqrt" => {
-					check_arg_count!(args, 0);
-					Ok(Variant::Real(r.sqrt()))
-				}
-				_ => Err(CallError::UndefinedFunction),
-			},
-			Variant::Integer(_) => Err(CallError::UndefinedFunction),
-			Variant::Object(o) => o.call(function, args),
-		}
-	}
-}
-
 impl Script {
 	pub(crate) fn new(locals: FxHashMap<Box<str>, u16>) -> Self {
 		Self {
 			functions: FxHashMap::with_hasher(Default::default()),
 			locals,
 		}
-	}
-
-	pub(crate) fn shrink(&mut self) {
-		self.locals.shrink_to_fit();
-		self.functions.shrink_to_fit();
 	}
 
 	fn call(
