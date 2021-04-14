@@ -1,5 +1,5 @@
-use crate::bytecode::{ByteCode, CallResult, Environment, RunError};
-use crate::Variant;
+use crate::bytecode::{ByteCode, CallResult, RunError};
+use crate::{Environment, Variant};
 use core::any::{Any, TypeId};
 use core::fmt::Debug;
 use rustc_hash::FxHashMap;
@@ -50,7 +50,7 @@ pub enum CallError {
 }
 
 pub trait ScriptType: Debug + 'static {
-	fn call(&self, function: &str, args: &[Variant]) -> CallResult<CallError>;
+	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult<CallError>;
 
 	fn dup(&self) -> ScriptObject;
 
@@ -119,17 +119,8 @@ impl Script {
 		function: &str,
 		locals: &mut [Variant],
 		args: &[Variant],
+		env: &Environment,
 	) -> Result<Variant, CallError> {
-		let mut env = Environment::new();
-		env.add_function(
-			"print".into(),
-			Box::new(|a: &[_]| {
-				a.iter().for_each(|a| println!("{:?}", a));
-				Ok(Variant::None)
-			}),
-		)
-		.unwrap();
-
 		if let Some(function) = self.functions.get(function) {
 			function
 				.run(&self.functions, locals, args, &env)
@@ -156,9 +147,9 @@ impl From<Script> for Class {
 }
 
 impl ScriptType for Instance {
-	fn call(&self, function: &str, args: &[Variant]) -> CallResult<CallError> {
+	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult<CallError> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
-			self.script.call(function, &mut vars, args)
+			self.script.call(function, &mut vars, args, env)
 		} else {
 			Err(CallError::AlreadyBorrowed)
 		}
@@ -170,7 +161,7 @@ impl ScriptType for Instance {
 }
 
 impl ScriptType for Box<str> {
-	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
 		todo!()
 	}
 
@@ -178,7 +169,7 @@ impl ScriptType for Box<str> {
 }
 
 impl ScriptType for char {
-	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
 		todo!()
 	}
 
@@ -186,7 +177,7 @@ impl ScriptType for char {
 }
 
 impl ScriptType for String {
-	fn call(&self, _: &str, _: &[Variant]) -> CallResult<CallError> {
+	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
 		todo!()
 	}
 

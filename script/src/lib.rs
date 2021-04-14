@@ -5,14 +5,17 @@ use unwrap_none::UnwrapNone;
 
 mod ast;
 mod bytecode;
+mod environment;
 mod script;
 mod tokenizer;
 mod variant;
 
+pub use environment::Environment;
 use rustc_hash::FxHashMap;
 use script::Script;
 pub use script::{CallError, Class, ScriptIter, ScriptObject, ScriptType};
 pub use variant::Variant;
+pub use bytecode::CallResult;
 
 use bytecode::ByteCodeBuilder;
 use tokenizer::TokenStream;

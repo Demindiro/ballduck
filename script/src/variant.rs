@@ -1,7 +1,7 @@
 use crate::bytecode::CallResult;
-use crate::{CallError, ScriptObject};
+use crate::{CallError, Environment, ScriptObject};
 use core::cmp;
-use core::fmt::Debug;
+use core::fmt;
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 
 #[derive(Clone, Debug)]
@@ -160,7 +160,12 @@ impl PartialOrd<Self> for Variant {
 }
 
 impl Variant {
-	pub fn call(&self, function: &str, args: &[Variant]) -> Result<Variant, CallError> {
+	pub fn call(
+		&self,
+		function: &str,
+		args: &[Variant],
+		env: &Environment,
+	) -> Result<Variant, CallError> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
 			Variant::Bool(_) => Err(CallError::UndefinedFunction),
@@ -172,7 +177,7 @@ impl Variant {
 				_ => Err(CallError::UndefinedFunction),
 			},
 			Variant::Integer(_) => Err(CallError::UndefinedFunction),
-			Variant::Object(o) => o.call(function, args),
+			Variant::Object(o) => o.call(function, args, env),
 		}
 	}
 
@@ -189,6 +194,19 @@ impl Variant {
 				}
 			}
 			Variant::Object(_) => Err(CallError::IncompatibleType),
+		}
+	}
+}
+
+impl fmt::Display for Variant {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+		match self {
+			Variant::None => f.write_str("none"),
+			Variant::Bool(false) => f.write_str("false"),
+			Variant::Bool(true) => f.write_str("true"),
+			Variant::Real(n) => write!(f, "{}", n),
+			Variant::Integer(n) => write!(f, "{}", n),
+			Variant::Object(n) => write!(f, "{:?}", n),
 		}
 	}
 }

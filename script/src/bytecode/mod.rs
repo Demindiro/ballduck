@@ -3,11 +3,10 @@ mod builder;
 pub(crate) use builder::ByteCodeBuilder;
 
 use crate::script::CallError;
-use crate::{ScriptIter, Variant};
+use crate::{Environment, Variant};
 use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
 
 struct CallArgs {
 	store_in: Option<u16>,
@@ -66,25 +65,13 @@ pub enum RunError {
 	IpOutOfBounds,
 	RegisterOutOfBounds,
 	NoIterator,
-	EnvironmentError(EnvironmentError),
 	UndefinedFunction,
 	CallError(Box<CallError>),
 	IncorrectArgumentCount,
 	IncompatibleType,
 }
 
-pub struct Environment {
-	functions: FxHashMap<Box<str>, EnvironmentFunction>,
-}
-
-pub type EnvironmentFunction = Box<dyn Fn(&[Variant]) -> CallResult<RunError>>;
 pub type CallResult<E = CallError> = Result<Variant, E>;
-
-#[derive(Debug)]
-pub enum EnvironmentError {
-	FunctionAlreadyExists,
-	UndefinedFunction,
-}
 
 macro_rules! run_op {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
@@ -132,7 +119,6 @@ impl ByteCode {
 		loop {
 			let err_roob = || RunError::RegisterOutOfBounds;
 			let err_uf = || RunError::UndefinedFunction;
-			let err_env = |e| RunError::EnvironmentError(e);
 			let err_call = |e| RunError::CallError(Box::new(e));
 			if let Some(instr) = self.code.get(ip as usize) {
 				ip += 1;
@@ -150,7 +136,7 @@ impl ByteCode {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
 						let obj = vars.get(*reg as usize).ok_or(err_roob())?;
-						let r = obj.call(func, &call_args[..]).map_err(err_call)?;
+						let r = obj.call(func, &call_args[..], env).map_err(err_call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
@@ -164,7 +150,7 @@ impl ByteCode {
 						for &a in args.iter() {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
-						let r = env.call(func, &call_args[..]).map_err(err_env)?;
+						let r = env.call(func, &call_args[..]).map_err(err_call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
@@ -241,36 +227,6 @@ impl ByteCode {
 				break Err(RunError::IpOutOfBounds);
 			}
 		}
-	}
-}
-
-impl Environment {
-	pub fn new() -> Self {
-		Self {
-			functions: FxHashMap::with_hasher(Default::default()),
-		}
-	}
-
-	pub fn add_function(
-		&mut self,
-		name: String,
-		f: EnvironmentFunction,
-	) -> Result<(), EnvironmentError> {
-		match self.functions.entry(name.into_boxed_str()) {
-			Entry::Vacant(e) => {
-				e.insert(f);
-				Ok(())
-			}
-			Entry::Occupied(_) => Err(EnvironmentError::FunctionAlreadyExists),
-		}
-	}
-
-	pub fn call(&self, func: &str, args: &[Variant]) -> CallResult<EnvironmentError> {
-		Ok(self
-			.functions
-			.get(func)
-			.ok_or(EnvironmentError::UndefinedFunction)?(args)
-		.unwrap())
 	}
 }
 
