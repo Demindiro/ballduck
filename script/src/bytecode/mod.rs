@@ -25,9 +25,8 @@ enum Instruction {
 	RetSome,
 	RetNone,
 
-	IterConst(Box<(u16, u32, Box<dyn ScriptIter>)>),
+	Iter(u16, u16, u32),
 	IterJmp(u16, u32),
-	IterInt(u16, isize),
 
 	Add(u16, u16, u16),
 	Sub(u16, u16, u16),
@@ -189,25 +188,15 @@ impl ByteCode {
 					}
 					RetSome => break Ok(vars.first().ok_or(err_roob())?.clone()),
 					RetNone => break Ok(Variant::None),
-					IterConst(box (reg, jmp_ip, iter)) => {
-						let mut iter = iter.iter();
+					Iter(reg, iter, jmp_ip) => {
+						let iter = vars.get(*iter as usize).ok_or(err_roob())?;
+						let mut iter = iter.iter().map_err(err_call)?;
 						if let Some(e) = iter.next() {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = e;
 							iterators.push(iter);
 						} else {
 							ip = *jmp_ip;
 						}
-					}
-					IterInt(reg, i) => {
-						let mut iter = if *i < 0 {
-							Box::new(((1 - i)..=0).rev().map(Variant::Integer))
-								as Box<dyn Iterator<Item = Variant>>
-						} else {
-							Box::new((0..*i).map(Variant::Integer))
-								as Box<dyn Iterator<Item = Variant>>
-						};
-						*vars.get_mut(*reg as usize).ok_or(err_roob())? = iter.next().unwrap();
-						iterators.push(iter);
 					}
 					IterJmp(reg, jmp_ip) => {
 						if let Some(iter) = iterators.last_mut() {
@@ -297,8 +286,7 @@ impl Debug for Instruction {
 			RetSome => write!(f, "ret     0"),
 			RetNone => write!(f, "ret     none"),
 
-			IterConst(box (r, p, i)) => write!(f, "iter    {}, {}, {:?}", r, p, i),
-			IterInt(r, i) => write!(f, "iter    {}, {}", r, i),
+			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
 			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
 			Jmp(p) => write!(f, "jmp     {}", p),

@@ -175,4 +175,20 @@ impl Variant {
 			Variant::Object(o) => o.call(function, args),
 		}
 	}
+
+	pub fn iter(&self) -> Result<Box<dyn Iterator<Item = Variant>>, CallError> {
+		match self {
+			Variant::None => Err(CallError::IsEmpty),
+			Variant::Bool(_) => Err(CallError::IncompatibleType),
+			Variant::Real(_) => Err(CallError::IncompatibleType),
+			&Variant::Integer(i) => {
+				if i < 0 {
+					Ok(Box::new((-i + 1..=0).rev().map(|i| Variant::Integer(i))))
+				} else {
+					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
+				}
+			}
+			Variant::Object(_) => Err(CallError::IncompatibleType),
+		}
+	}
 }

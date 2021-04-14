@@ -62,7 +62,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 							conv(a);
 						}
 					}
-					Move(_, a) | JmpIf(a, _) => conv(a),
+					Move(_, a) | JmpIf(a, _) | Iter(_, a, _) => conv(a),
 					Add(_, a, b)
 					| Sub(_, a, b)
 					| Mul(_, a, b)
@@ -80,7 +80,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						conv(a);
 						conv(b);
 					}
-					IterConst(_) | IterInt(_, _) | IterJmp(_, _) | Jmp(_) | RetSome | RetNone => (),
+					IterJmp(_, _) | Jmp(_) | RetSome | RetNone => (),
 				}
 			}
 		}
@@ -108,17 +108,16 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					self.curr_var_count += 1;
 					match expr {
 						Expression::Atom(a) => {
-							self.instr.push(match a {
-								Atom::String(a) => Instruction::IterConst(Box::new((
-									reg,
-									u32::MAX,
-									Box::new(a.to_string().into_boxed_str()),
-								))),
-								Atom::Integer(a) => Instruction::IterInt(reg, *a),
-								//Atom::Real(a) => Instruction::IterConst(Box::new(a)),
+							let c = match a {
+								Atom::String(a) => {
+									let r = a.to_string().into_boxed_str();
+									self.add_const(Variant::Object(Rc::new(r)))
+								}
+								Atom::Integer(a) => self.add_const(Variant::Integer(*a)),
 								Atom::Real(a) => todo!("for Real({})", a),
 								Atom::Name(a) => todo!("for {:?}", a),
-							})
+							};
+							self.instr.push(Instruction::Iter(reg, c, u32::MAX));
 						}
 						_ => todo!(),
 					}
@@ -128,8 +127,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					self.instr.push(Instruction::IterJmp(reg, ip));
 					let ip = self.instr.len() as u32;
 					match self.instr.get_mut(ic) {
-						Some(Instruction::IterConst(ic)) => ic.1 = ip,
-						Some(Instruction::IterInt(..)) => (),
+						Some(Instruction::Iter(_, _, ic)) => *ic = ip,
 						_ => unreachable!(),
 					}
 					self.curr_var_count = og_cvc;
@@ -296,5 +294,10 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				Ok(None)
 			}
 		}
+	}
+
+	fn add_const(&mut self, var: Variant) -> u16 {
+		self.consts.push(var);
+		u16::MAX - self.consts.len() as u16 + 1
 	}
 }
