@@ -21,7 +21,7 @@ pub(crate) enum Instruction {
 	CallSelf(Box<CallArgs>),
 	CallGlobal(Box<CallArgs>),
 
-	//Jmp(u32),
+	Jmp(u32),
 	JmpIf(u16, u32),
 	RetSome,
 	RetNone,
@@ -150,7 +150,7 @@ impl ByteCode {
 						conv(a);
 						conv(b);
 					}
-					IterConst(_) | IterInt(_, _) | IterJmp(_, _) | RetSome | RetNone => (),
+					IterConst(_) | IterInt(_, _) | IterJmp(_, _) | Jmp(_) | RetSome | RetNone => (),
 				}
 			}
 		}
@@ -176,83 +176,25 @@ impl ByteCode {
 		let mut frame_vars = Vec::new();
 		for line in lines {
 			match line {
-				Statement::Call {
-					func,
-					args: arguments,
-				} => {
-					let og_cvc = *curr_var_count;
-					let mut args = Vec::with_capacity(arguments.len());
-					// TODO move this to `parse_expression`
-					for a in arguments {
-						let mut add_const = |v| {
-							consts.push(v);
-							u16::MAX - consts.len() as u16 + 1
-						};
-						args.push(match a {
-							Expression::Atom(a) => match a {
-								Atom::String(a) => add_const(Variant::Object(Rc::new(
-									a.to_string().into_boxed_str(),
-								))),
-								Atom::Integer(a) => add_const(Variant::Integer(*a)),
-								Atom::Real(a) => add_const(Variant::Real(*a)),
-								Atom::Name(a) => todo!("call {:?}", a),
-							},
-							Expression::Function {
-								name,
-								arguments,
-								expr,
-							} => {
-								let mut args = Vec::with_capacity(arguments.len());
-								let store_in = *curr_var_count;
-								*curr_var_count += 1;
-								let og_cvc = *curr_var_count;
-								for a in arguments {
-									match a {
-										Expression::Atom(a) => {
-											args.push(match a {
-												Atom::String(a) => add_const(Variant::Object(
-													Rc::new(a.to_string().into_boxed_str()),
-												)),
-												Atom::Integer(a) => add_const(Variant::Integer(*a)),
-												Atom::Real(a) => add_const(Variant::Real(*a)),
-												Atom::Name(a) => {
-													*vars.get(a).expect("TODO check for locals")
-												}
-											});
-										}
-										e => todo!("{:?}", e),
-									}
-								}
-								min_var_count = min_var_count.max(*curr_var_count);
-								*curr_var_count = og_cvc;
-								let args = CallArgs {
-									store_in: Some(store_in),
-									func: (*name).into(),
-									args: args.into_boxed_slice(),
-								};
-								instr.push(Instruction::CallSelf(Box::new(args)));
-								store_in
-							}
-							e => todo!("{:?}", e),
-						});
-					}
-					min_var_count = min_var_count.max(*curr_var_count);
-					*curr_var_count = og_cvc;
-					let args = Box::new(CallArgs {
-						store_in: None,
-						func: (*func).into(),
-						args: args.into_boxed_slice(),
-					});
-					instr.push(if methods.contains_key(func) {
-						Instruction::CallSelf(args)
-					} else {
-						Instruction::CallGlobal(args)
-					});
+				Statement::Expression { expr } => {
+					Self::parse_expression(
+						None,
+						expr,
+						locals,
+						methods,
+						instr,
+						vars,
+						consts,
+						&mut min_var_count,
+						curr_var_count,
+					)?;
 				}
 				Statement::For { var, expr, lines } => {
+					let og_cvc = *curr_var_count;
 					let reg = vars.len().try_into().expect("Too many variables");
 					vars.insert(var, reg).unwrap_none();
 					frame_vars.push(var);
+					*curr_var_count += 1;
 					match expr {
 						Expression::Atom(a) => {
 							instr.push(match a {
@@ -288,12 +230,15 @@ impl ByteCode {
 						Some(Instruction::IterInt(..)) => (),
 						_ => unreachable!(),
 					}
+					*curr_var_count = og_cvc;
 				}
-				Statement::If { expr, lines } => {
+				Statement::If { expr, lines, else_lines } => {
+					// If
 					let expr = Self::parse_expression(
-						*curr_var_count,
+						Some(*curr_var_count),
 						expr,
 						locals,
+						methods,
 						instr,
 						vars,
 						consts,
@@ -318,18 +263,43 @@ impl ByteCode {
 						curr_var_count,
 						min_var_count,
 					)?;
+					// Skip else
+					let skip_else_jmp = else_lines.as_ref().map(|_| {
+						instr.push(Instruction::Jmp(u32::MAX));
+						instr.len() - 1
+					});
+					// Jump to right after `if` block if `expr` evaluates to false
 					let ip = instr.len() as u32;
 					match instr.get_mut(ic) {
 						Some(Instruction::JmpIf(_, ic)) => *ic = ip,
-						i => unreachable!("{:?}", i),
+						_ => unreachable!(),
+					}
+					// Else
+					if let Some(else_lines) = else_lines {
+						min_var_count = Self::parse_block(
+							else_lines,
+							methods,
+							locals,
+							instr,
+							vars,
+							consts,
+							curr_var_count,
+							min_var_count,
+						)?;
+						let ip = instr.len() as u32;
+						match instr.get_mut(skip_else_jmp.unwrap()) {
+							Some(Instruction::Jmp(ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
 					}
 				}
 				Statement::Return { expr } => {
 					if let Some(expr) = expr {
 						let r = Self::parse_expression(
-							0,
+							Some(0),
 							expr,
 							locals,
+							methods,
 							instr,
 							vars,
 							consts,
@@ -355,9 +325,10 @@ impl ByteCode {
 	}
 
 	fn parse_expression(
-		store: u16,
+		store: Option<u16>,
 		expr: &Expression,
 		locals: &FxHashMap<Box<str>, u16>,
+		methods: &FxHashMap<&str, ()>,
 		instr: &mut Vec<Instruction>,
 		vars: &FxHashMap<&str, u16>,
 		consts: &mut Vec<Variant>,
@@ -370,14 +341,16 @@ impl ByteCode {
 		};
 		match expr {
 			Expression::Operation { left, op, right } => {
+				let store = store.expect("TODO: handle operations without store location");
 				let og_cvc = *curr_var_count;
 				let (r_left, r_right) = (*curr_var_count, *curr_var_count + 1);
 				*curr_var_count += 2;
 				*min_var_count = *min_var_count.max(curr_var_count);
 				let or_left = Self::parse_expression(
-					r_left,
+					Some(r_left),
 					left,
 					locals,
+					methods,
 					instr,
 					vars,
 					consts,
@@ -391,9 +364,10 @@ impl ByteCode {
 					r_left
 				};
 				let or_right = Self::parse_expression(
-					r_right,
+					Some(r_right),
 					right,
 					locals,
+					methods,
 					instr,
 					vars,
 					consts,
@@ -418,16 +392,17 @@ impl ByteCode {
 				*curr_var_count = og_cvc;
 				Ok(None)
 			}
-			Expression::Atom(a) => match a {
-				&Atom::Name(name) => {
+			Expression::Atom(a) => match *a {
+				Atom::Name(name) => {
 					if let Some(&reg) = vars.get(name).or_else(|| locals.get(name)) {
 						Ok(Some(reg))
 					} else {
 						return Err(ByteCodeError::UndefinedVariable);
 					}
 				}
-				&Atom::Integer(i) => Ok(Some(add_const(Variant::Integer(i)))),
-				a => todo!("{:?}", a),
+				Atom::Real(r) => Ok(Some(add_const(Variant::Real(r)))),
+				Atom::Integer(i) => Ok(Some(add_const(Variant::Integer(i)))),
+				Atom::String(s) => Ok(Some(add_const(Variant::Object(Rc::new(s.to_string().into_boxed_str()))))),
 			},
 			Expression::Function {
 				expr,
@@ -439,9 +414,10 @@ impl ByteCode {
 					let r = *curr_var_count;
 					*curr_var_count += 1;
 					let e = Self::parse_expression(
-						r,
+						Some(r),
 						expr,
 						locals,
+						methods,
 						instr,
 						vars,
 						consts,
@@ -457,9 +433,10 @@ impl ByteCode {
 					let r = *curr_var_count;
 					*curr_var_count += 1;
 					let e = Self::parse_expression(
-						r,
+						Some(r),
 						a,
 						locals,
+						methods,
 						instr,
 						vars,
 						consts,
@@ -474,14 +451,16 @@ impl ByteCode {
 					}
 				}
 				let ca = CallArgs {
-					store_in: Some(store),
+					store_in: store,
 					func: (*name).into(),
 					args: args.into_boxed_slice(),
 				};
 				instr.push(if let Some(expr) = expr {
 					Instruction::Call(Box::new((expr, ca)))
-				} else {
+				} else if methods.get(name).is_some() {
 					Instruction::CallSelf(Box::new(ca))
+				} else {
+					Instruction::CallGlobal(Box::new(ca))
 				});
 				*curr_var_count = og_cvc;
 				Ok(None)
@@ -610,6 +589,7 @@ impl ByteCode {
 							return Err(RunError::NoIterator);
 						}
 					}
+					Jmp(jmp_ip) => ip = *jmp_ip,
 					Move(r, a) => {
 						let e = mem::take(vars.get_mut(*a as usize).ok_or(err_roob())?);
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
@@ -632,10 +612,40 @@ impl ByteCode {
 						let e = (a * b).map_err(err_call)?;
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
+					Div(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = (a / b).map_err(err_call)?;
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Rem(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = (a % b).map_err(err_call)?;
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
 					LessEq(r, a, b) => {
 						let a = vars.get(*a as usize).ok_or(err_roob())?;
 						let b = vars.get(*b as usize).ok_or(err_roob())?;
 						let e = Variant::Bool(a <= b);
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Less(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = Variant::Bool(a < b);
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Neq(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = Variant::Bool(a != b);
+						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
+					}
+					Eq(r, a, b) => {
+						let a = vars.get(*a as usize).ok_or(err_roob())?;
+						let b = vars.get(*b as usize).ok_or(err_roob())?;
+						let e = Variant::Bool(a == b);
 						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
 					}
 					_ => todo!("{:?}", instr),
@@ -688,10 +698,12 @@ impl Debug for Instruction {
 			Move(a, b) => write!(f, "move    {:?}, {:?}", a, b),
 			RetSome => write!(f, "ret     0"),
 			RetNone => write!(f, "ret     none"),
+
 			IterConst(box (r, p, i)) => write!(f, "iter    {}, {}, {:?}", r, p, i),
 			IterInt(r, i) => write!(f, "iter    {}, {}", r, i),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
 			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
+			Jmp(p) => write!(f, "jmp     {}", p),
 
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
 			Sub(r, a, b) => write!(f, "sub     {}, {}, {}", r, a, b),

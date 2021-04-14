@@ -2,7 +2,7 @@ use crate::bytecode::{ByteCode, CallResult, Environment, RunError};
 use core::any::{Any, TypeId};
 use core::cmp;
 use core::fmt::Debug;
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, Mul, Sub, Rem, Div};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -109,24 +109,6 @@ impl dyn ScriptType + 'static {
 	}
 }
 
-/*
-impl Mul<Self> for &ScriptObject {
-	type Output = CallResult<CallError>;
-
-	fn mul(self, rhs: Self) -> Self::Output {
-		self.as_ref().mul(rhs)
-	}
-}
-
-impl Add<Self> for &ScriptObject {
-	type Output = CallResult<CallError>;
-
-	fn add(self, rhs: Self) -> Self::Output {
-		self.as_ref().add(rhs)
-	}
-}
-*/
-
 macro_rules! err_op {
 	() => {
 		return Err(CallError::IncompatibleType);
@@ -189,6 +171,50 @@ impl Mul<Self> for &Variant {
 			&Variant::Integer(a) => match rhs {
 				Variant::Real(b) => Variant::Real(a as f64 * b),
 				Variant::Integer(b) => Variant::Integer(a * b),
+				_ => err_op!(),
+			},
+			_ => err_op!(),
+		})
+	}
+}
+
+impl Div<Self> for &Variant {
+	type Output = CallResult;
+
+	#[inline]
+	fn div(self, rhs: Self) -> Self::Output {
+		// FIXME handle division by 0 for integers
+		Ok(match self {
+			Variant::Real(a) => match rhs {
+				Variant::Real(b) => Variant::Real(a / b),
+				&Variant::Integer(b) => Variant::Real(a / b as f64),
+				_ => err_op!(),
+			},
+			&Variant::Integer(a) => match rhs {
+				Variant::Real(b) => Variant::Real(a as f64 / b),
+				Variant::Integer(b) => Variant::Integer(a / b),
+				_ => err_op!(),
+			},
+			_ => err_op!(),
+		})
+	}
+}
+
+impl Rem<Self> for &Variant {
+	type Output = CallResult;
+
+	#[inline]
+	fn rem(self, rhs: Self) -> Self::Output {
+		// FIXME handle division by 0 for integers
+		Ok(match self {
+			Variant::Real(a) => match rhs {
+				Variant::Real(b) => Variant::Real(a % b),
+				&Variant::Integer(b) => Variant::Real(a % b as f64),
+				_ => err_op!(),
+			},
+			&Variant::Integer(a) => match rhs {
+				Variant::Real(b) => Variant::Real(a as f64 % b),
+				Variant::Integer(b) => Variant::Integer(a % b),
 				_ => err_op!(),
 			},
 			_ => err_op!(),

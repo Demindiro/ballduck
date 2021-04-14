@@ -73,6 +73,7 @@ pub enum TokenError {
 #[derive(Debug)]
 pub struct TokenStream<'src> {
 	tokens: Vec<(Token<'src>, u32, u32)>,
+	current_index: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -277,7 +278,10 @@ impl<'src> TokenStream<'src> {
 				Err(e) => {
 					break if let TokenError::Empty = e {
 						Self::remove_redundant(&mut tokens);
-						Ok(Self { tokens })
+						Ok(Self {
+							tokens,
+							current_index: 0,
+						})
 					} else {
 						Err(TokenStreamError::TokenError(e))
 					}
@@ -286,8 +290,30 @@ impl<'src> TokenStream<'src> {
 		}
 	}
 
-	pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Token<'src>, u32, u32)> + '_ {
-		self.tokens.iter().cloned()
+	/// Returns the next token and advances the iterator
+	pub fn next(&mut self) -> Option<Token<'src>> {
+		if self.current_index < self.tokens.len() {
+			self.current_index += 1;
+			Some(self.tokens[self.current_index - 1].0)
+		} else {
+			None
+		}
+	}
+
+	/// Rewinds the iterator by one token. Returns true if successful
+	pub fn prev(&mut self) -> bool {
+		if self.current_index > 0 {
+			self.current_index -= 1;
+			true
+		} else {
+			false
+		}
+	}
+
+	/// Returns the line and column of the current token
+	pub fn position(&self) -> (u32, u32) {
+		let e = self.tokens[self.current_index - 1];
+		(e.1, e.2)
 	}
 
 	/// Removes redundant tokens, such as multiple Indents in a row. It also shrinks the vec
@@ -468,10 +494,20 @@ mod test {
 		use super::*;
 
 		#[test]
+		fn next_prev() {
+			let src = "fn";
+			let mut s = TokenStream::parse(src).expect("Failed to parse source");
+			assert_eq!(s.prev(), false);
+			assert_eq!(s.next(), Some(Token::Fn));
+			assert_eq!(s.next(), None);
+			assert_eq!(s.prev(), true);
+			assert_eq!(s.prev(), false);
+		}
+
+		#[test]
 		fn hello_world() {
 			let src = "fn main()\n\tprintln(\"Hello, world!\")";
-			let s = TokenStream::parse(src).expect("Failed to parse source");
-			let mut s = s.iter().map(|(v, _, _)| v);
+			let mut s = TokenStream::parse(src).expect("Failed to parse source");
 			assert_eq!(s.next(), Some(Token::Fn));
 			assert_eq!(s.next(), Some(Token::Name("main")));
 			assert_eq!(s.next(), Some(Token::BracketRoundOpen));
@@ -487,8 +523,7 @@ mod test {
 		#[test]
 		fn vector_len() {
 			let src = "fn vec2_len(x, y)\n\treturn x * x + y * y";
-			let s = TokenStream::parse(src).expect("Failed to parse source");
-			let mut s = s.iter().map(|(v, _, _)| v);
+			let mut s = TokenStream::parse(src).expect("Failed to parse source");
 			assert_eq!(s.next(), Some(Token::Fn));
 			assert_eq!(s.next(), Some(Token::Name("vec2_len")));
 			assert_eq!(s.next(), Some(Token::BracketRoundOpen));

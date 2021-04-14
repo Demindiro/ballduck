@@ -28,9 +28,8 @@ pub(crate) enum Statement<'src> {
 		assign_op: AssignOp,
 		expr: Expression<'src>,
 	},
-	Call {
-		func: &'src str,
-		args: Vec<Expression<'src>>,
+	Expression {
+		expr: Expression<'src>,
 	},
 	For {
 		var: &'src str,
@@ -40,6 +39,7 @@ pub(crate) enum Statement<'src> {
 	If {
 		expr: Expression<'src>,
 		lines: Lines<'src>,
+		else_lines: Option<Lines<'src>>,
 	},
 	Return {
 		expr: Option<Expression<'src>>,
@@ -81,43 +81,50 @@ pub struct Error {
 pub enum ErrorType {
 	UnexpectedIndent(u8),
 	UnexpectedToken(String),
+	ExpectedToken(String),
 	UnexpectedEOF,
 	Noop,
 	NotANumber,
 }
 
 macro_rules! err {
-	($err:ident, $line:expr, $column:expr) => {
-		return Error::new(ErrorType::$err, $line, $column, line!());
-	};
-	(UnexpectedToken, $err_val:expr, $line:expr, $column:expr) => {{
-		let tk = format!("{:?}", $err_val);
-		return Error::new(ErrorType::UnexpectedToken(tk), $line, $column, line!());
+	($err:ident, $tokens:ident) => {{
+		let (l, c) = $tokens.position();
+		return Error::new(ErrorType::$err, l, c, line!());
 	}};
-	($err:ident, $err_val:expr, $line:expr, $column:expr) => {
-		return Error::new(ErrorType::$err($err_val), $line, $column, line!());
-	};
+	(UnexpectedToken, $err_val:expr, $tokens:ident) => {{
+		let tk = format!("{:?}", $err_val);
+		let (l, c) = $tokens.position();
+		return Error::new(ErrorType::UnexpectedToken(tk), l, c, line!());
+	}};
+	(ExpectedToken, $err_val:expr, $tokens:ident) => {{
+		let tk = format!("{:?}", $err_val);
+		let (l, c) = $tokens.position();
+		return Error::new(ErrorType::UnexpectedToken(tk), l, c, line!());
+	}};
+	($err:ident, $err_val:expr, $tokens:ident) => {{
+		let (l, c) = $tokens.position();
+		return Error::new(ErrorType::$err($err_val), l, c, line!());
+	}};
 }
 
 impl<'src> Script<'src> {
-	pub(crate) fn parse(tokens: TokenStream<'src>) -> Result<Self, Error> {
+	pub(crate) fn parse(mut tokens: TokenStream<'src>) -> Result<Self, Error> {
 		let mut functions = Vec::new();
 		let mut variables = Vec::new();
-		let mut iter = tokens.iter();
-		while let Some((tk, line, column)) = iter.next() {
+		while let Some(tk) = tokens.next() {
 			match tk {
-				Token::Let => match iter.next() {
-					Some((Token::Name(name), ..)) => variables.push(name),
-					Some((_, l, c)) => todo!("none"),
-					None => todo!("none"),
+				Token::Let => match tokens.next() {
+					Some(Token::Name(name)) => variables.push(name),
+					e => todo!("{:?}", e),
 				},
-				Token::Fn => match Function::parse(&mut iter) {
+				Token::Fn => match Function::parse(&mut tokens) {
 					Ok(f) => functions.push(f),
 					Err(f) => return Err(f),
 				},
 				Token::Indent(0) => (),
-				Token::Indent(i) => err!(UnexpectedIndent, i, line, column),
-				_ => err!(UnexpectedToken, tk, line, column),
+				Token::Indent(i) => err!(UnexpectedIndent, i, tokens),
+				_ => err!(UnexpectedToken, tk, tokens),
 			}
 		}
 		Ok(Self {
@@ -127,30 +134,28 @@ impl<'src> Script<'src> {
 	}
 }
 
-type TokenGroup<'src> = (Token<'src>, u32, u32);
-
 impl<'src> Function<'src> {
-	fn parse(tokens: &mut impl Iterator<Item = TokenGroup<'src>>) -> Result<Self, Error> {
+	fn parse(tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
 		let name = match tokens.next() {
-			Some((Token::Name(name), _, _)) => name,
-			Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-			None => err!(UnexpectedEOF, 0, 0),
+			Some(Token::Name(name)) => name,
+			Some(tk) => err!(UnexpectedToken, tk, tokens),
+			None => err!(UnexpectedEOF, tokens),
 		};
 		match tokens.next() {
-			Some((Token::BracketRoundOpen, _, _)) => (),
-			Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-			None => err!(UnexpectedEOF, 0, 0),
+			Some(Token::BracketRoundOpen) => (),
+			Some(tk) => err!(UnexpectedToken, tk, tokens),
+			None => err!(UnexpectedEOF, tokens),
 		}
 
 		let mut parameters = Vec::new();
 		loop {
 			match tokens.next() {
-				Some((Token::BracketRoundClose, _, _)) => break,
-				Some((Token::Name(a), l, c)) => {
+				Some(Token::BracketRoundClose) => break,
+				Some(Token::Name(a)) => {
 					parameters.push(a);
 					match tokens.next() {
-						Some((Token::BracketRoundClose, ..)) => break,
-						Some((Token::Comma, ..)) => (),
+						Some(Token::BracketRoundClose) => break,
+						Some(Token::Comma) => (),
 						e => todo!("{:?}", e),
 					}
 				}
@@ -159,79 +164,47 @@ impl<'src> Function<'src> {
 		}
 
 		// Ensure there is one and only one tab
-		let (l, c) = match tokens.next() {
-			Some((Token::Indent(i), l, c)) if i == 1 => (l, c),
-			Some((Token::Indent(i), l, c)) => err!(UnexpectedIndent, i, l, c),
-			Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-			None => err!(UnexpectedEOF, 0, 0),
-		};
+		match tokens.next() {
+			Some(Token::Indent(i)) if i == 1 => (),
+			Some(Token::Indent(i)) => err!(UnexpectedIndent, i, tokens),
+			Some(tk) => err!(UnexpectedToken, tk, tokens),
+			None => err!(UnexpectedEOF, tokens),
+		}
 
 		Ok(Self {
 			name,
 			parameters,
-			lines: Self::parse_block(tokens, 1, l, c)?.0,
+			lines: Self::parse_block(tokens, 1)?.0,
 		})
 	}
 
 	fn parse_block(
-		tokens: &mut impl Iterator<Item = TokenGroup<'src>>,
+		tokens: &mut TokenStream<'src>,
 		expected_indent: u8,
-		mut line: u32,
-		mut column: u32,
 	) -> Result<(Lines<'src>, u8), Error> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
-				Some((Token::Name(name), ll, lc)) => {
-					let mut args = Vec::new();
-					match tokens.next() {
-						Some((Token::BracketRoundOpen, l, c)) => match tokens.next() {
-							Some((Token::BracketRoundClose, ..)) => (),
-							Some((mut pre, ..)) => {
-								loop {
-									let (expr, last_tk) = Expression::parse(pre, tokens)?;
-									args.push(expr);
-									match last_tk {
-										Some(Token::Comma) => (),
-										Some(Token::BracketRoundClose) => break,
-										None => err!(UnexpectedEOF, 0, 0),
-										tk => {
-											panic!("Expression did not parse all tokens: {:?}", tk)
-										}
-									}
-									pre = if let Some((tk, ..)) = tokens.next() {
-										tk
-									} else {
-										err!(UnexpectedEOF, 0, 0);
-									};
-								}
-								lines.push(Statement::Call { func: name, args });
-							}
-							None => err!(UnexpectedEOF, l, c),
-						},
-						Some(e) => {
-							dbg!(e);
-							todo!()
-						}
-						None => err!(UnexpectedEOF, ll, lc),
+				Some(Token::Name(name)) => match tokens.next() {
+					Some(Token::BracketRoundOpen) => {
+						tokens.prev();
+						tokens.prev();
+						let expr = Expression::parse(tokens)?;
+						lines.push(Statement::Expression { expr });
 					}
-				}
-				Some((Token::For, mut ll, mut lc)) => {
+					e => todo!("{:?}", e),
+				},
+				Some(Token::For) => {
 					let var = match tokens.next() {
-						Some((Token::Name(n), ..)) => n,
-						Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-						None => err!(UnexpectedEOF, line, column),
+						Some(Token::Name(n)) => n,
+						Some(tk) => err!(UnexpectedToken, tk, tokens),
+						None => err!(UnexpectedEOF, tokens),
 					};
-					match tokens.next() {
-						Some((Token::In, ..)) => (),
-						Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
-						None => err!(UnexpectedEOF, line, column),
+					if tokens.next() != Some(Token::In) {
+						err!(ExpectedToken, Token::In, tokens);
 					}
-					let (expr, tk) = match tokens.next() {
-						Some((tk, ..)) => Expression::parse(tk, tokens)?,
-						None => err!(UnexpectedEOF, line, column),
-					};
-					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1, ll, lc)?;
+					let expr = Expression::parse(tokens)?;
+					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
 					lines.push(Statement::For {
 						var,
 						expr,
@@ -241,49 +214,66 @@ impl<'src> Function<'src> {
 						return Ok((lines, indent));
 					}
 				}
-				Some((Token::If, ll, lc)) => {
-					let (expr, tk) = match tokens.next() {
-						Some((tk, ..)) => Expression::parse(tk, tokens)?,
-						None => err!(UnexpectedEOF, ll, lc),
-					};
-					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1, ll, lc)?;
-					lines.push(Statement::If { expr, lines: blk });
+				Some(Token::If) => {
+					let expr = Expression::parse(tokens)?;
+					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
+					lines.push(Statement::If { expr, lines: blk, else_lines: None });
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
-				}
-				Some((Token::Pass, ..)) => (),
-				Some((Token::Return, l, c)) => {
-					if let Some((tk, l, c)) = tokens.next() {
-						let (expr, tk) = match Expression::parse(tk, tokens) {
-							Ok((expr, tk)) => (Some(expr), tk),
-							e => todo!("{:?}", e),
-						};
-						lines.push(Statement::Return { expr });
-						if let Some(Token::Indent(i)) = tk {
-							if i < expected_indent {
-								return Ok((lines, i));
+					let mut prev_blk = &mut lines;
+					while let Some(tk) = tokens.next() {
+						if tk == Token::Elif {
+							let expr = Expression::parse(tokens)?;
+							let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
+							let if_blk = Vec::from([Statement::If { expr, lines: blk, else_lines: None }]);
+							prev_blk = match prev_blk.last_mut().unwrap() {
+								Statement::If { else_lines, .. } => {
+									*else_lines = Some(if_blk);
+									else_lines.as_mut().unwrap()
+								}
+								_ => unreachable!(),
+							};
+							if indent < expected_indent {
+								return Ok((lines, indent));
 							}
+						} else if tk == Token::Else {
+							let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
+							match prev_blk.last_mut().unwrap() {
+								Statement::If { else_lines, .. } => *else_lines = Some(blk),
+								_ => unreachable!(),
+							};
+							if indent < expected_indent {
+								return Ok((lines, indent));
+							}
+						} else {
+							tokens.prev();
+							break;
 						}
-					} else {
-						err!(UnexpectedEOF, l, c);
 					}
 				}
+				Some(Token::Pass) => (),
+				Some(Token::Return) => {
+					let expr = if let Some(_) = tokens.next() {
+						tokens.prev();
+						Some(Expression::parse(tokens)?)
+					} else {
+						None
+					};
+					lines.push(Statement::Return { expr });
+				}
 				None => return Ok((lines, 0)),
-				Some((Token::Indent(i), ..)) if i < expected_indent => return Ok((lines, i)),
-				Some((Token::Indent(i), ..)) if i == expected_indent => (),
-				Some((Token::Indent(i), l, c)) => err!(UnexpectedIndent, i, l, c),
-				tk => todo!("{:?}", tk),
+				Some(Token::Indent(i)) if i < expected_indent => return Ok((lines, i)),
+				Some(Token::Indent(i)) if i == expected_indent => (),
+				Some(Token::Indent(i)) => err!(UnexpectedIndent, i, tokens),
+				tk => todo!("{:#?} {:?}", lines, tk),
 			};
 		}
 	}
 }
 
 impl<'src> Expression<'src> {
-	fn parse(
-		pre: Token<'src>,
-		tokens: &mut impl Iterator<Item = (Token<'src>, u32, u32)>,
-	) -> Result<(Self, Option<Token<'src>>), Error> {
+	fn parse(tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
 		let expr_op = |left, op, right| Expression::Operation {
 			left: Box::new(left),
 			op,
@@ -294,130 +284,174 @@ impl<'src> Expression<'src> {
 			name,
 			arguments,
 		};
-		let expr_num = |n, l, c, sl| {
+		let expr_num = |n, tokens: &mut TokenStream, sl| {
 			if let Ok(n) = parse_number(n) {
 				Ok(Expression::Atom(n))
 			} else {
+				let (l, c) = tokens.position();
 				Error::new(ErrorType::NotANumber, l, c, sl)
 			}
 		};
 		let expr_name = |n| Expression::Atom(Atom::Name(n));
 		fn parse_fn_args<'src>(
-			tokens: &mut impl Iterator<Item = TokenGroup<'src>>,
+			tokens: &mut TokenStream<'src>,
 			sl: u32,
 		) -> Result<Vec<Expression<'src>>, Error> {
-			let expr_num = |n, l, c, sl| {
-				if let Ok(n) = parse_number(n) {
-					Ok(Expression::Atom(n))
-				} else {
-					Error::new(ErrorType::NotANumber, l, c, sl)
-				}
-			};
-			let expr_name = |n| Expression::Atom(Atom::Name(n));
 			let mut args = Vec::new();
 			loop {
-				let tk = match tokens.next() {
-					Some((Token::BracketRoundClose, ..)) => break,
-					Some((tk, l, c)) => {
-						let (expr, tk) = Expression::parse(tk, tokens)?;
+				match tokens.next() {
+					Some(Token::BracketRoundClose) => break,
+					Some(tk) => {
+						tokens.prev();
+						let expr = Expression::parse(tokens)?;
 						args.push(expr);
-						tk.map(|tk| (tk, l, c)).or_else(|| tokens.next())
 					}
-					//Some((Token::Number(n), l, c)) => args.push(expr_num(n, l, c, sl)?),
-					//Some((Token::Name(n), ..)) => args.push(expr_name(n)),
 					e => todo!("{:?}", e),
 				};
-				match tk {
-					Some((Token::Comma, ..)) => (),
-					Some((Token::BracketRoundClose, ..)) => break,
-					Some((tk, l, c)) => err!(UnexpectedToken, tk, l, c),
+				match tokens.next() {
+					Some(Token::Comma) => (),
+					Some(Token::BracketRoundClose) => break,
+					Some(tk) => { dbg!(tk); todo!() },//err!(UnexpectedToken, tk, tokens),
 					tk => {
 						dbg!(tk, args);
 						todo!()
 					}
-					None => err!(UnexpectedEOF, 0, 0),
+					None => err!(UnexpectedEOF, tokens),
 				}
 			}
 			Ok(args)
 		}
 
-		let (lhs, last_tk) = match pre {
-			Token::BracketRoundOpen => match tokens.next() {
-				Some((pre, ..)) => Self::parse(pre, tokens).map(|(e, t)| (e, t))?,
-				None => err!(UnexpectedEOF, 0, 0),
-			},
-			Token::String(s) => (Expression::Atom(Atom::String(s)), None),
-			Token::Number(n) => (expr_num(n, 0, 0, line!())?, None),
-			Token::Name(name) => match tokens.next() {
-				Some((Token::BracketRoundOpen, ..)) => {
-					(expr_fn(None, name, parse_fn_args(tokens, line!())?), None)
+		let lhs = match tokens.next() {
+			Some(Token::BracketRoundOpen) => {
+				let e = Self::parse(tokens)?;
+				if tokens.next() != Some(Token::BracketRoundClose) {
+					err!(ExpectedToken, Token::BracketRoundClose, tokens);
 				}
-				Some((tk, ..)) => (expr_name(name), Some(tk)),
+				e
+			}
+			Some(Token::String(s)) => Self::Atom(Atom::String(s)),
+			Some(Token::Number(n)) => expr_num(n, tokens, line!())?,
+			Some(Token::Name(name)) => match tokens.next() {
+				Some(Token::BracketRoundOpen) => {
+					expr_fn(None, name, parse_fn_args(tokens, line!())?)
+				}
+				Some(_) => {
+					tokens.prev();
+					expr_name(name)
+				}
 				e => todo!("{:?}", e),
 			},
 			e => todo!("{:?}", e),
 		};
 
-		if let Some(last_tk) = last_tk {
-			match last_tk {
+		if let Some(tk) = tokens.next() {
+			match tk {
 				Token::Op(opl) => match tokens.next() {
-					Some((Token::Name(mid), ..)) => {
+					Some(Token::Name(mid)) => {
 						let og_mid = mid;
 						let mid = expr_name(mid);
 						match tokens.next() {
-							Some((Token::Op(opr), ..)) => match tokens.next() {
-								Some((Token::Name(rhs), ..)) => {
-									let (left, op, right) = if opl >= opr {
-										let rhs = Expression::parse(Token::Name(rhs), tokens)?.0;
-										let lhs = expr_op(lhs, opl, mid);
-										(lhs, opr, rhs)
-									} else {
-										let rhs = expr_op(mid, opr, expr_name(rhs));
-										(lhs, opl, rhs)
-									};
-									Ok((expr_op(left, op, right), tokens.next().map(|v| v.0)))
-								}
+							Some(Token::Op(opr)) => match tokens.next() {
+								Some(Token::Name(rhs)) => Self::parse_tri_op(
+									lhs,
+									opl,
+									mid,
+									opr,
+									Self::new_name(rhs),
+									tokens,
+								),
 								e => todo!("{:?}", e),
 							},
-							Some((Token::BracketRoundOpen, ..)) => {
+							Some(Token::BracketRoundOpen) => {
 								let args = parse_fn_args(tokens, line!())?;
 								match opl {
-									Op::Access => Ok((
-										expr_fn(Some(lhs), og_mid, args),
-										Some(Token::BracketRoundClose),
-									)),
-									op => Ok((
-										expr_op(lhs, op, expr_fn(None, og_mid, args)),
-										Some(Token::BracketRoundClose),
-									)),
+									Op::Access => Ok(expr_fn(Some(lhs), og_mid, args)),
+									op => Ok(expr_op(lhs, op, expr_fn(None, og_mid, args))),
 								}
 							}
-							Some((tk, ..))
-								if tk == Token::BracketRoundClose || tk == Token::Indent(0) =>
-							{
-								Ok((expr_op(lhs, opl, mid), Some(tk)))
+							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+								tokens.prev();
+								Ok(expr_op(lhs, opl, mid))
 							}
-							None => Ok((expr_op(lhs, opl, mid), None)),
+							None => Ok(expr_op(lhs, opl, mid)),
 							e => todo!("{:?}", e),
 						}
 					}
-					Some((Token::Number(n), l, c)) => {
-						Ok((expr_op(lhs, opl, expr_num(n, l, c, line!())?), None))
-					}
+					Some(Token::Number(mid)) => match tokens.next() {
+						Some(Token::Op(opr)) => match tokens.next() {
+							Some(Token::Name(rhs)) => Self::parse_tri_op(
+								lhs,
+								opl,
+								expr_num(mid, tokens, line!())?,
+								opr,
+								Self::new_name(rhs),
+								tokens,
+							),
+							Some(Token::Number(rhs)) => Self::parse_tri_op(
+								lhs,
+								opl,
+								expr_num(mid, tokens, line!())?,
+								opr,
+								expr_num(rhs, tokens, line!())?,
+								tokens,
+							),
+							e => todo!("{:?}", e),
+						}
+						Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+							tokens.prev();
+							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
+						}
+						e => todo!("{:?}", e),
+					},
 					e => todo!("{:?}", e),
 				},
-				// FIXME is this correct?
-				Token::BracketRoundClose => Ok((lhs, Some(Token::BracketRoundClose))),
-				e => todo!("{:?} ------ {:?}", e, lhs),
+				Token::BracketRoundClose | Token::Indent(_) => {
+					tokens.prev();
+					Ok(lhs)
+				}
+				// TODO is this correct?
+				Token::Comma => {
+					tokens.prev();
+					Ok(lhs)
+				}
+				e => todo!("{:?} ------ {:?}   {:?}", lhs, e, tokens.position()),
 			}
 		} else {
-			match tokens.next() {
-				Some((Token::BracketRoundClose, ..)) => Ok((lhs, Some(Token::BracketRoundClose))),
-				Some((Token::Comma, ..)) => Ok((lhs, Some(Token::Comma))),
-				Some((Token::Indent(i), ..)) => Ok((lhs, Some(Token::Indent(i)))),
-				e => todo!("{:?}", e),
-			}
+			Ok(lhs)
 		}
+	}
+
+	fn parse_tri_op(
+		left: Self,
+		op_left: Op,
+		mid: Self,
+		op_right: Op,
+		right: Self,
+		tokens: &mut TokenStream<'src>,
+	) -> Result<Self, Error> {
+		let (left, op, right) = if op_left >= op_right {
+			tokens.prev();
+			let right = Self::parse(tokens)?;
+			let left = Self::new_op(left, op_left, mid);
+			(left, op_right, right)
+		} else {
+			let right = Self::new_op(mid, op_right, right);
+			(left, op_left, right)
+		};
+		Ok(Self::new_op(left, op, right))
+	}
+
+	fn new_op(left: Self, op: Op, right: Self) -> Self {
+		Self::Operation {
+			left: Box::new(left),
+			op,
+			right: Box::new(right),
+		}
+	}
+
+	fn new_name(n: &'src str) -> Self {
+		Self::Atom(Atom::Name(n))
 	}
 }
 
