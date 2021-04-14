@@ -91,15 +91,6 @@ impl dyn ScriptType + 'static {
 	}
 }
 
-/// Regular ol' clone doesn't work because of [`Sized`] stuff, so this exists
-macro_rules! impl_dup {
-	() => {
-		fn dup(&self) -> ScriptObject {
-			Rc::new(self.clone()) as ScriptObject
-		}
-	};
-}
-
 pub trait ScriptIter: Debug {
 	fn iter(&self) -> ScriptIterator;
 }
@@ -157,41 +148,5 @@ impl ScriptType for Instance {
 
 	fn dup(&self) -> ScriptObject {
 		todo!();
-	}
-}
-
-impl ScriptType for Box<str> {
-	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
-		todo!()
-	}
-
-	impl_dup!();
-}
-
-impl ScriptType for char {
-	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
-		todo!()
-	}
-
-	impl_dup!();
-}
-
-impl ScriptType for String {
-	fn call(&self, _: &str, _: &[Variant], _: &Environment) -> CallResult<CallError> {
-		todo!()
-	}
-
-	impl_dup!();
-}
-
-impl ScriptIter for Box<str> {
-	fn iter(&self) -> ScriptIterator {
-		Box::new(self.chars().map(|c| Variant::Object(Rc::new(c))))
-	}
-}
-
-impl ScriptIter for String {
-	fn iter(&self) -> ScriptIterator {
-		Box::new(self.chars().map(|c| Variant::Object(Rc::new(c))))
 	}
 }

@@ -3,6 +3,7 @@ use crate::{CallError, Environment, ScriptObject};
 use core::cmp;
 use core::fmt;
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 /// Variant type that encodes a few common types. Having the common types
@@ -12,6 +13,8 @@ pub enum Variant {
 	Bool(bool),
 	Real(f64),
 	Integer(isize),
+	Char(char),
+	String(Rc<str>),
 	Object(ScriptObject),
 }
 
@@ -177,6 +180,14 @@ impl Variant {
 				_ => Err(CallError::UndefinedFunction),
 			},
 			Variant::Integer(_) => Err(CallError::UndefinedFunction),
+			Variant::Char(_) => Err(CallError::UndefinedFunction),
+			Variant::String(s) => match function {
+				"len" => {
+					check_arg_count!(args, 0);
+					Ok(Variant::Integer(s.len() as isize))
+				}
+				_ => Err(CallError::UndefinedFunction),
+			}
 			Variant::Object(o) => o.call(function, args, env),
 		}
 	}
@@ -184,8 +195,6 @@ impl Variant {
 	pub fn iter(&self) -> Result<Box<dyn Iterator<Item = Variant>>, CallError> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
-			Variant::Bool(_) => Err(CallError::IncompatibleType),
-			Variant::Real(_) => Err(CallError::IncompatibleType),
 			&Variant::Integer(i) => {
 				if i < 0 {
 					Ok(Box::new((-i + 1..=0).rev().map(|i| Variant::Integer(i))))
@@ -193,7 +202,11 @@ impl Variant {
 					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
 				}
 			}
-			Variant::Object(_) => Err(CallError::IncompatibleType),
+			Variant::String(s) => Ok({
+				let s = StringIter::new(s.clone());
+				Box::new(s.iter.map(|c| Variant::Char(c)))
+			}),
+			_ => Err(CallError::IncompatibleType),
 		}
 	}
 }
@@ -206,7 +219,25 @@ impl fmt::Display for Variant {
 			Variant::Bool(true) => f.write_str("true"),
 			Variant::Real(n) => write!(f, "{}", n),
 			Variant::Integer(n) => write!(f, "{}", n),
+			Variant::Char(n) => write!(f, "{}", n),
+			Variant::String(n) => write!(f, "{}", n),
 			Variant::Object(n) => write!(f, "{:?}", n),
+		}
+	}
+}
+
+struct StringIter<'a> {
+	_string: Rc<str>,
+	iter: core::str::Chars<'a>,
+}
+
+impl<'a> StringIter<'a> {
+	fn new(string: Rc<str>) -> Self {
+		let iter = string.chars();
+		// SAFETY: the reference held by `iter` is valid as long as `string´ isn't dropped
+		unsafe {
+			let iter = core::mem::transmute(iter);
+			Self { _string: string, iter }
 		}
 	}
 }

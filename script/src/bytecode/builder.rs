@@ -4,7 +4,6 @@ use crate::tokenizer::Op;
 use crate::Variant;
 use core::convert::TryInto;
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's> {
@@ -109,10 +108,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					match expr {
 						Expression::Atom(a) => {
 							let c = match a {
-								Atom::String(a) => {
-									let r = a.to_string().into_boxed_str();
-									self.add_const(Variant::Object(Rc::new(r)))
-								}
+								Atom::String(a) => self.add_const(Variant::String(a.to_string().into())),
 								Atom::Integer(a) => self.add_const(Variant::Integer(*a)),
 								Atom::Real(a) => todo!("for Real({})", a),
 								Atom::Name(a) => todo!("for {:?}", a),
@@ -248,9 +244,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Atom::Real(r) => Ok(Some(add_const(Variant::Real(r)))),
 				Atom::Integer(i) => Ok(Some(add_const(Variant::Integer(i)))),
-				Atom::String(s) => Ok(Some(add_const(Variant::Object(Rc::new(
-					s.to_string().into_boxed_str(),
-				))))),
+				Atom::String(s) => Ok(Some(add_const(Variant::String(s.to_string().into())))),
 			},
 			Expression::Function {
 				expr,
