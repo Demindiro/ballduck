@@ -69,29 +69,32 @@ pub enum RunError {
 	CallError(Box<CallError>),
 	IncorrectArgumentCount,
 	IncompatibleType,
+	NotBoolean,
 }
 
 pub type CallResult<E = CallError> = Result<Variant, E>;
 
+macro_rules! reg {
+	(ref $vars:ident $reg:ident) => {
+		$vars.get(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+	};
+	(mut $vars:ident $reg:ident) => {
+		*reg!(ref mut $vars $reg)
+	};
+	(ref mut $vars:ident $reg:expr) => {
+		$vars.get_mut(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+	};
+}
+
 macro_rules! run_op {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		{
-			let a = $vars.get(*$a as usize).ok_or(RunError::RegisterOutOfBounds)?;
-			let b = $vars.get(*$b as usize).ok_or(RunError::RegisterOutOfBounds)?;
-			let e = (a $op b).map_err(err::call)?;
-			*$vars.get_mut(*$r as usize).ok_or(RunError::RegisterOutOfBounds)? = e;
-		}
+		reg!(mut $vars $r) = (reg!(ref $vars $a) $op reg!(ref $vars $b)).map_err(err::call)?;
 	};
 }
 
 macro_rules! run_cmp {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		{
-			let a = $vars.get(*$a as usize).ok_or(RunError::RegisterOutOfBounds)?;
-			let b = $vars.get(*$b as usize).ok_or(RunError::RegisterOutOfBounds)?;
-			let e = Variant::Bool(a $op b);
-			*$vars.get_mut(*$r as usize).ok_or(RunError::RegisterOutOfBounds)? = e;
-		}
+		reg!(mut $vars $r) = Variant::Bool(reg!(ref $vars $a) $op reg!(ref $vars $b));
 	};
 }
 
@@ -117,8 +120,6 @@ impl ByteCode {
 		let mut iterators = Vec::new();
 		let mut call_args = Vec::new();
 		loop {
-			let err_roob = || RunError::RegisterOutOfBounds;
-			let err_uf = || RunError::UndefinedFunction;
 			if let Some(instr) = self.code.get(ip as usize) {
 				ip += 1;
 				use Instruction::*;
@@ -131,14 +132,14 @@ impl ByteCode {
 							args,
 						},
 					) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+						for a in args.iter() {
+							call_args.push(reg!(ref vars a).clone());
 						}
-						let obj = vars.get(*reg as usize).ok_or(err_roob())?;
+						let obj = reg!(ref vars reg);
 						let r = obj.call(func, &call_args[..], env).map_err(err::call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
-							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
+							reg!(mut vars reg) = r;
 						}
 					}
 					CallGlobal(box CallArgs {
@@ -146,13 +147,13 @@ impl ByteCode {
 						func,
 						args,
 					}) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+						for a in args.iter() {
+							call_args.push(reg!(ref vars a).clone());
 						}
 						let r = env.call(func, &call_args[..]).map_err(err::call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
-							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
+							reg!(mut vars reg) = r;
 						}
 					}
 					CallSelf(box CallArgs {
@@ -160,53 +161,46 @@ impl ByteCode {
 						func,
 						args,
 					}) => {
-						for &a in args.iter() {
-							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
+						for a in args.iter() {
+							call_args.push(reg!(ref vars a).clone());
 						}
-						let r = functions.get(func).ok_or(err_uf())?;
+						let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
 						let r = r.run(functions, locals, &call_args[..], env)?;
 						call_args.clear();
-						// SAFETY: ditto
 						if let Some(reg) = store_in {
-							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
+							reg!(mut vars reg) = r;
 						}
 					}
-					RetSome => break Ok(vars.first().ok_or(err_roob())?.clone()),
+					RetSome => break Ok(mem::take(reg!(ref mut vars &0))),
 					RetNone => break Ok(Variant::None),
 					Iter(reg, iter, jmp_ip) => {
-						let iter = vars.get(*iter as usize).ok_or(err_roob())?;
+						let iter = reg!(ref vars iter);
 						let mut iter = iter.iter().map_err(err::call)?;
 						if let Some(e) = iter.next() {
-							*vars.get_mut(*reg as usize).ok_or(err_roob())? = e;
+							reg!(mut vars reg) = e;
 							iterators.push(iter);
 						} else {
 							ip = *jmp_ip;
 						}
 					}
 					IterJmp(reg, jmp_ip) => {
-						if let Some(iter) = iterators.last_mut() {
-							if let Some(e) = iter.next() {
-								*vars.get_mut(*reg as usize).ok_or(err_roob())? = e;
-								ip = *jmp_ip;
-							}
-						} else {
-							return Err(RunError::NoIterator);
+						let iter = iterators.last_mut().ok_or(RunError::NoIterator)?;
+						if let Some(e) = iter.next() {
+							reg!(mut vars reg) = e;
+							ip = *jmp_ip;
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
-						if let Variant::Bool(b) = vars.get(*reg as usize).ok_or(err_roob())? {
+						if let Variant::Bool(b) = reg!(ref vars reg) {
 							if !b {
 								ip = *jmp_ip;
 							}
 						} else {
-							return Err(RunError::NoIterator);
+							return Err(RunError::NotBoolean);
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
-					Move(r, a) => {
-						let e = mem::take(vars.get_mut(*a as usize).ok_or(err_roob())?);
-						*vars.get_mut(*r as usize).ok_or(err_roob())? = e;
-					}
+					Move(r, a) => reg!(mut vars r) = mem::take(reg!(ref mut vars a)),
 					Add(r, a, b) => run_op!(vars, r = a + b),
 					Sub(r, a, b) => run_op!(vars, r = a - b),
 					Mul(r, a, b) => run_op!(vars, r = a * b),
