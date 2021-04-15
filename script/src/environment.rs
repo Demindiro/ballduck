@@ -1,6 +1,6 @@
+use crate::{CallError, CallResult, Variant};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
-use crate::{CallResult, CallError, Variant};
 
 #[derive(Default)]
 pub struct Environment {
@@ -36,8 +36,7 @@ impl Environment {
 	}
 
 	pub fn call(&self, func: &str, args: &[Variant]) -> CallResult {
-		self
-			.functions
+		self.functions
 			.get(func)
 			.ok_or(CallError::UndefinedFunction)?(args)
 	}

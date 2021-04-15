@@ -187,7 +187,7 @@ impl Variant {
 					Ok(Variant::Integer(s.len() as isize))
 				}
 				_ => Err(CallError::UndefinedFunction),
-			}
+			},
 			Variant::Object(o) => o.call(function, args, env),
 		}
 	}
@@ -237,7 +237,10 @@ impl<'a> StringIter<'a> {
 		// SAFETY: the reference held by `iter` is valid as long as `string´ isn't dropped
 		unsafe {
 			let iter = core::mem::transmute(iter);
-			Self { _string: string, iter }
+			Self {
+				_string: string,
+				iter,
+			}
 		}
 	}
 }

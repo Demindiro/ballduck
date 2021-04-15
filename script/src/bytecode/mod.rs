@@ -15,7 +15,7 @@ struct CallArgs {
 }
 
 enum Instruction {
-	Call(Box<(u16, CallArgs)>),
+	Call(u16, Box<CallArgs>),
 	CallSelf(Box<CallArgs>),
 	CallGlobal(Box<CallArgs>),
 
@@ -124,14 +124,14 @@ impl ByteCode {
 				ip += 1;
 				use Instruction::*;
 				match instr {
-					Call(box (
+					Call(
 						reg,
-						CallArgs {
+						box CallArgs {
 							store_in,
 							func,
 							args,
 						},
-					)) => {
+					) => {
 						for &a in args.iter() {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
@@ -235,7 +235,7 @@ impl Debug for Instruction {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		use Instruction::*;
 		match self {
-			Call(box (r, a)) => write!(f, "call    {}, {:?}", r, a),
+			Call(r, a) => write!(f, "call    {}, {:?}", r, a),
 			CallSelf(a) => write!(f, "call    self, {:?}", a),
 			CallGlobal(a) => write!(f, "call    env, {:?}", a),
 			Move(a, b) => write!(f, "move    {:?}, {:?}", a, b),

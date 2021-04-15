@@ -56,7 +56,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					}
 				};
 				match i {
-					Call(box (_, ca)) | CallSelf(box ca) | CallGlobal(box ca) => {
+					Call(_, box ca) | CallSelf(box ca) | CallGlobal(box ca) => {
 						for a in ca.args.iter_mut() {
 							conv(a);
 						}
@@ -108,7 +108,9 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					match expr {
 						Expression::Atom(a) => {
 							let c = match a {
-								Atom::String(a) => self.add_const(Variant::String(a.to_string().into())),
+								Atom::String(a) => {
+									self.add_const(Variant::String(a.to_string().into()))
+								}
 								Atom::Integer(a) => self.add_const(Variant::Integer(*a)),
 								Atom::Real(a) => todo!("for Real({})", a),
 								Atom::Name(a) => todo!("for {:?}", a),
@@ -272,17 +274,17 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						args.push(r);
 					}
 				}
-				let ca = CallArgs {
+				let ca = Box::new(CallArgs {
 					store_in: store,
 					func: (*name).into(),
 					args: args.into_boxed_slice(),
-				};
+				});
 				self.instr.push(if let Some(expr) = expr {
-					Instruction::Call(Box::new((expr, ca)))
+					Instruction::Call(expr, ca)
 				} else if self.methods.get(name).is_some() {
-					Instruction::CallSelf(Box::new(ca))
+					Instruction::CallSelf(ca)
 				} else {
-					Instruction::CallGlobal(Box::new(ca))
+					Instruction::CallGlobal(ca)
 				});
 				self.curr_var_count = og_cvc;
 				Ok(None)

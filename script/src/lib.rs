@@ -10,12 +10,12 @@ mod script;
 mod tokenizer;
 mod variant;
 
+pub use bytecode::CallResult;
 pub use environment::Environment;
 use rustc_hash::FxHashMap;
 use script::Script;
 pub use script::{CallError, Class, ScriptIter, ScriptObject, ScriptType};
 pub use variant::Variant;
-pub use bytecode::CallResult;
 
 use bytecode::ByteCodeBuilder;
 use tokenizer::TokenStream;
