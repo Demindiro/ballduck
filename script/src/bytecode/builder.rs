@@ -40,7 +40,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 		}
 		builder.parse_block(&function.lines)?;
 		match builder.instr.last() {
-			Some(Instruction::RetSome) | Some(Instruction::RetNone) => (),
+			Some(Instruction::RetSome(_)) | Some(Instruction::RetNone) => (),
 			_ => builder.instr.push(Instruction::RetNone),
 		}
 
@@ -61,7 +61,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 							conv(a);
 						}
 					}
-					Move(_, a) | JmpIf(a, _) | Iter(_, a, _) => conv(a),
+					JmpIf(a, _) | Iter(_, a, _) | RetSome(a) => conv(a),
 					Add(_, a, b)
 					| Sub(_, a, b)
 					| Mul(_, a, b)
@@ -79,7 +79,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						conv(a);
 						conv(b);
 					}
-					IterJmp(_, _) | Jmp(_) | RetSome | RetNone => (),
+					IterJmp(_, _) | Jmp(_) | RetNone => (),
 				}
 			}
 		}
@@ -169,11 +169,8 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Statement::Return { expr } => {
 					if let Some(expr) = expr {
-						let r = self.parse_expression(Some(0), expr)?;
-						if let Some(r) = r {
-							self.instr.push(Instruction::Move(0, r));
-						}
-						self.instr.push(Instruction::RetSome);
+						let r = self.parse_expression(Some(0), expr)?.unwrap_or(0);
+						self.instr.push(Instruction::RetSome(r));
 					} else {
 						self.instr.push(Instruction::RetNone);
 					}

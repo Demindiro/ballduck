@@ -21,7 +21,7 @@ enum Instruction {
 
 	Jmp(u32),
 	JmpIf(u16, u32),
-	RetSome,
+	RetSome(u16),
 	RetNone,
 
 	Iter(u16, u16, u32),
@@ -42,8 +42,6 @@ enum Instruction {
 	Less(u16, u16, u16),
 	Neq(u16, u16, u16),
 	Eq(u16, u16, u16),
-
-	Move(u16, u16),
 }
 
 #[derive(Debug)]
@@ -185,7 +183,7 @@ impl ByteCode {
 							reg!(mut vars reg) = r;
 						}
 					}
-					RetSome => break Ok(mem::take(reg!(ref mut vars &0))),
+					RetSome(reg) => break Ok(mem::take(reg!(ref mut vars reg))),
 					RetNone => break Ok(Variant::None),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = reg!(ref vars iter);
@@ -220,7 +218,6 @@ impl ByteCode {
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
-					Move(r, a) => reg!(mut vars r) = mem::take(reg!(ref mut vars a)),
 					Add(r, a, b) => run_op!(vars, r = a + b),
 					Sub(r, a, b) => run_op!(vars, r = a - b),
 					Mul(r, a, b) => run_op!(vars, r = a * b),
@@ -251,8 +248,7 @@ impl Debug for Instruction {
 			Call(r, a) => write!(f, "call    {}, {:?}", r, a),
 			CallSelf(a) => write!(f, "call    self, {:?}", a),
 			CallGlobal(a) => write!(f, "call    env, {:?}", a),
-			Move(a, b) => write!(f, "move    {:?}, {:?}", a, b),
-			RetSome => write!(f, "ret     0"),
+			RetSome(reg) => write!(f, "ret     {}", reg),
 			RetNone => write!(f, "ret     none"),
 
 			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
