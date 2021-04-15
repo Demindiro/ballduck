@@ -74,6 +74,7 @@ pub enum RunError {
 
 pub type CallResult<E = CallError> = Result<Variant, E>;
 
+#[cfg(not(feature = "unsafe-loop"))]
 macro_rules! reg {
 	(ref $vars:ident $reg:ident) => {
 		$vars.get(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
@@ -83,6 +84,19 @@ macro_rules! reg {
 	};
 	(ref mut $vars:ident $reg:expr) => {
 		$vars.get_mut(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+	};
+}
+
+#[cfg(feature = "unsafe-loop")]
+macro_rules! reg {
+	(ref $vars:ident $reg:ident) => {
+		unsafe { $vars.get_unchecked(*$reg as usize) }
+	};
+	(mut $vars:ident $reg:ident) => {
+		*reg!(ref mut $vars $reg)
+	};
+	(ref mut $vars:ident $reg:expr) => {
+		unsafe { $vars.get_unchecked_mut(*$reg as usize) }
 	};
 }
 
@@ -184,7 +198,13 @@ impl ByteCode {
 						}
 					}
 					IterJmp(reg, jmp_ip) => {
+						#[cfg(not(feature = "unsafe-loop"))]
 						let iter = iterators.last_mut().ok_or(RunError::NoIterator)?;
+						#[cfg(feature = "unsafe-loop")]
+						let iter = unsafe {
+							let i = iterators.len() - 1;
+							iterators.get_unchecked_mut(i)
+						};
 						if let Some(e) = iter.next() {
 							reg!(mut vars reg) = e;
 							ip = *jmp_ip;
