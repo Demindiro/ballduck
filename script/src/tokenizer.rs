@@ -40,7 +40,7 @@ pub enum Token<'src> {
 	Number(&'src str),
 	Name(&'src str),
 	String(&'src str),
-	Let,
+	Var,
 	BracketRoundOpen,
 	BracketRoundClose,
 	BracketSquareOpen,
@@ -261,7 +261,7 @@ impl Token<'_> {
 							"while" => Token::While,
 							"for" => Token::For,
 							"in" => Token::In,
-							"let" => Token::Let,
+							"var" => Token::Var,
 							"fn" => Token::Fn,
 							"return" => Token::Return,
 							"pass" => Token::Pass,
@@ -481,7 +481,7 @@ mod test {
 
 		#[test]
 		fn declare() {
-			assert_eq!(Token::parse("let foo", true), Ok((Token::Let, 3)));
+			assert_eq!(Token::parse("var foo", true), Ok((Token::Var, 3)));
 		}
 
 		#[test]

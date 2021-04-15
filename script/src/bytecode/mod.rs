@@ -42,12 +42,10 @@ enum Instruction {
 	Less(u16, u16, u16),
 	Neq(u16, u16, u16),
 	Eq(u16, u16, u16),
-}
 
-#[derive(Debug)]
-pub enum ByteCodeError {
-	DuplicateParameter,
-	UndefinedVariable,
+	Store(u16, u16),
+	Load(u16, u16),
+	Move(u16, u16),
 }
 
 #[derive(Debug)]
@@ -68,6 +66,7 @@ pub enum RunError {
 	IncorrectArgumentCount,
 	IncompatibleType,
 	NotBoolean,
+	LocalOutOfBounds,
 }
 
 pub type CallResult<E = CallError> = Result<Variant, E>;
@@ -232,6 +231,18 @@ impl ByteCode {
 					Less(r, a, b) => run_cmp!(vars, r = a < b),
 					Neq(r, a, b) => run_cmp!(vars, r = a != b),
 					Eq(r, a, b) => run_cmp!(vars, r = a == b),
+					Store(r, l) => {
+						*locals
+							.get_mut(*l as usize)
+							.ok_or(RunError::LocalOutOfBounds)? = reg!(ref vars r).clone();
+					}
+					Load(r, l) => {
+						reg!(mut vars r) = locals
+							.get(*l as usize)
+							.ok_or(RunError::LocalOutOfBounds)?
+							.clone();
+					}
+					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
 				}
 			} else {
 				break Err(RunError::IpOutOfBounds);
@@ -271,6 +282,10 @@ impl Debug for Instruction {
 			Neq(r, a, b) => write!(f, "neq     {}, {}, {}", r, a, b),
 			Less(r, a, b) => write!(f, "less    {}, {}, {}", r, a, b),
 			LessEq(r, a, b) => write!(f, "lesseq  {}, {}, {}", r, a, b),
+
+			Store(r, a) => write!(f, "store   {}, {}", r, a),
+			Load(r, a) => write!(f, "load    {}, {}", r, a),
+			Move(a, b) => write!(f, "move    {}, {}", a, b),
 		}
 	}
 }

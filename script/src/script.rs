@@ -124,9 +124,11 @@ impl Script {
 
 impl Class {
 	pub fn instance(&self) -> Instance {
+		let mut locals = Vec::new();
+		locals.resize(self.0.locals.len(), Variant::default());
 		Instance {
 			script: self.0.clone(),
-			variables: RefCell::new(Box::new([])),
+			variables: RefCell::new(locals.into_boxed_slice()),
 		}
 	}
 }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
-use crate::tokenizer::Op;
+use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
 use core::convert::TryInto;
 use rustc_hash::FxHashMap;
@@ -15,6 +15,13 @@ pub(crate) struct ByteCodeBuilder<'e, 's> {
 	curr_var_count: u16,
 	min_var_count: u16,
 	param_count: u16,
+}
+
+#[derive(Debug)]
+pub enum ByteCodeError {
+	DuplicateParameter,
+	DuplicateVar,
+	UndefinedVariable,
 }
 
 impl<'e, 's> ByteCodeBuilder<'e, 's> {
@@ -61,7 +68,12 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 							conv(a);
 						}
 					}
-					JmpIf(a, _) | Iter(_, a, _) | RetSome(a) => conv(a),
+					JmpIf(a, _)
+					| Iter(_, a, _)
+					| RetSome(a)
+					| Store(a, _)
+					| Load(a, _)
+					| Move(_, a) => conv(a),
 					Add(_, a, b)
 					| Sub(_, a, b)
 					| Mul(_, a, b)
@@ -175,7 +187,42 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						self.instr.push(Instruction::RetNone);
 					}
 				}
-				_ => todo!("{:#?}", line),
+				Statement::Assign {
+					var,
+					assign_op,
+					expr,
+				} => {
+					assert_eq!(*assign_op, AssignOp::None, "TODO handle assign ops");
+					if let Some(&reg) = self.vars.get(var) {
+						let expr = self.parse_expression(Some(reg), expr)?;
+						if let Some(expr) = expr {
+							self.instr.push(Instruction::Move(reg, expr));
+						}
+					} else if let Some(local) = self.locals.get(var as &str) {
+						let og_cvc = self.curr_var_count;
+						self.curr_var_count += 1;
+						let expr = self.parse_expression(Some(self.curr_var_count - 1), expr)?;
+						let e = if let Some(expr) = expr {
+							self.curr_var_count -= 1;
+							expr
+						} else {
+							self.curr_var_count
+						};
+						self.instr.push(Instruction::Store(e, *local));
+						self.min_var_count = self.min_var_count.max(self.curr_var_count);
+						self.curr_var_count = og_cvc;
+					} else {
+						return Err(ByteCodeError::UndefinedVariable);
+					}
+				}
+				Statement::Declare { var } => {
+					if self.vars.insert(var, self.curr_var_count).is_none() {
+						self.curr_var_count += 1;
+						self.min_var_count = self.min_var_count.max(self.curr_var_count);
+					} else {
+						return Err(ByteCodeError::DuplicateVar);
+					}
+				}
 			}
 		}
 		self.min_var_count = self.min_var_count.max(self.vars.len() as u16);
@@ -235,10 +282,14 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 			}
 			Expression::Atom(a) => match *a {
 				Atom::Name(name) => {
-					if let Some(&reg) = self.vars.get(name).or_else(|| self.locals.get(name)) {
+					if let Some(&reg) = self.vars.get(name) {
 						Ok(Some(reg))
+					} else if let Some(&local) = self.locals.get(name) {
+						let store = store.expect("No register to store local in");
+						self.instr.push(Instruction::Load(store, local));
+						Ok(None)
 					} else {
-						return Err(ByteCodeError::UndefinedVariable);
+						Err(ByteCodeError::UndefinedVariable)
 					}
 				}
 				Atom::Real(r) => Ok(Some(add_const(Variant::Real(r)))),
@@ -283,6 +334,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				} else {
 					Instruction::CallGlobal(ca)
 				});
+				self.min_var_count = self.min_var_count.max(self.curr_var_count);
 				self.curr_var_count = og_cvc;
 				Ok(None)
 			}

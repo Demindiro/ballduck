@@ -36,7 +36,7 @@ macro_rules! gen_op {
 	(
 		$trait:ident, $fn:ident
 		[$left:ident, $right:ident]
-		$([$lhs:ident, $rhs:ident] => $out:ident { $code:expr })*
+		$([$lhs:ident, $rhs:ident] => $out:ident $code:block)*
 	) => {
 		impl $trait<Self> for &Variant {
 			type Output = CallResult;
@@ -44,7 +44,7 @@ macro_rules! gen_op {
 			#[inline]
 			fn $fn(self, rhs: Self) -> Self::Output {
 				Ok(match (self, rhs) {
-					$((Variant::$lhs($left), Variant::$rhs($right)) => Variant::$out({ $code }),)*
+					$((Variant::$lhs($left), Variant::$rhs($right)) => Variant::$out($code),)*
 					_ => return Err(CallError::IncompatibleType),
 				})
 			}
@@ -59,6 +59,11 @@ gen_op!(
 	[Real, Integer] => Real { rhs + *lhs as f64 }
 	[Integer, Real] => Real { *rhs as f64 + lhs }
 	[Integer, Integer] => Integer { rhs + lhs }
+	[String, String] => String {
+		let mut out = rhs.to_string();
+		out.extend(lhs.chars());
+		out.into()
+	}
 );
 
 gen_op!(

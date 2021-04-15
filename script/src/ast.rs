@@ -111,7 +111,7 @@ impl<'src> Script<'src> {
 		let mut variables = Vec::new();
 		while let Some(tk) = tokens.next() {
 			match tk {
-				Token::Let => match tokens.next() {
+				Token::Var => match tokens.next() {
 					Some(Token::Name(name)) => variables.push(name),
 					e => todo!("{:?}", e),
 				},
@@ -182,14 +182,22 @@ impl<'src> Function<'src> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
-				Some(Token::Name(_)) => match tokens.next() {
+				Some(Token::Name(name)) => match tokens.next() {
 					Some(Token::BracketRoundOpen) => {
 						tokens.prev();
 						tokens.prev();
 						let expr = Expression::parse(tokens)?;
 						lines.push(Statement::Expression { expr });
 					}
-					e => todo!("{:?}", e),
+					Some(Token::Assign(op)) => match op {
+						AssignOp::None => lines.push(Statement::Assign {
+							var: name,
+							assign_op: op,
+							expr: Expression::parse(tokens)?,
+						}),
+						e => todo!("{:?} {:?}", e, tokens.position()),
+					},
+					e => todo!("{:?} {:?}", e, tokens.position()),
 				},
 				Some(Token::For) => {
 					let var = match tokens.next() {
@@ -266,6 +274,30 @@ impl<'src> Function<'src> {
 						None
 					};
 					lines.push(Statement::Return { expr });
+				}
+				Some(Token::Var) => {
+					let var = match tokens.next() {
+						Some(Token::Name(n)) => n,
+						Some(tk) => err!(UnexpectedToken, tk, tokens),
+						None => err!(UnexpectedEOF, tokens),
+					};
+					lines.push(Statement::Declare { var });
+					match tokens.next() {
+						Some(Token::Assign(assign_op)) => {
+							match assign_op {
+								AssignOp::None => {
+									let expr = Expression::parse(tokens)?;
+									lines.push(Statement::Assign { var, assign_op, expr });
+								}
+								op => todo!("{:?}", op),
+							}
+						}
+						Some(Token::Indent(_)) => {
+							tokens.prev();
+						}
+						Some(tk) => err!(UnexpectedToken, tk, tokens),
+						None => err!(UnexpectedEOF, tokens),
+					}
 				}
 				None => return Ok((lines, 0)),
 				Some(Token::Indent(i)) if i < expected_indent => return Ok((lines, i)),

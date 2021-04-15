@@ -1,0 +1,5 @@
+fn main()
+	var x = "apple"
+	var y = "pen"
+	var z = x + y
+	print(z)
