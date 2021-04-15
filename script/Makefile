@@ -9,3 +9,6 @@ run-examples: run-hello run-factorial run-fizzbuzz run-count run-vec2
 
 watch-test:
 	cargo watch -c -x test
+
+get-size:
+	nm --print-size --radix=d ../target/release/ballscript | less

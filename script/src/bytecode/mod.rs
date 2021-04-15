@@ -78,7 +78,7 @@ macro_rules! run_op {
 		{
 			let a = $vars.get(*$a as usize).ok_or(RunError::RegisterOutOfBounds)?;
 			let b = $vars.get(*$b as usize).ok_or(RunError::RegisterOutOfBounds)?;
-			let e = (a $op b).map_err(|e| RunError::CallError(Box::new(e)))?;
+			let e = (a $op b).map_err(err::call)?;
 			*$vars.get_mut(*$r as usize).ok_or(RunError::RegisterOutOfBounds)? = e;
 		}
 	};
@@ -119,7 +119,6 @@ impl ByteCode {
 		loop {
 			let err_roob = || RunError::RegisterOutOfBounds;
 			let err_uf = || RunError::UndefinedFunction;
-			let err_call = |e| RunError::CallError(Box::new(e));
 			if let Some(instr) = self.code.get(ip as usize) {
 				ip += 1;
 				use Instruction::*;
@@ -136,7 +135,7 @@ impl ByteCode {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
 						let obj = vars.get(*reg as usize).ok_or(err_roob())?;
-						let r = obj.call(func, &call_args[..], env).map_err(err_call)?;
+						let r = obj.call(func, &call_args[..], env).map_err(err::call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
@@ -150,7 +149,7 @@ impl ByteCode {
 						for &a in args.iter() {
 							call_args.push(vars.get(a as usize).ok_or(err_roob())?.clone());
 						}
-						let r = env.call(func, &call_args[..]).map_err(err_call)?;
+						let r = env.call(func, &call_args[..]).map_err(err::call)?;
 						call_args.clear();
 						if let Some(reg) = store_in {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = r;
@@ -176,7 +175,7 @@ impl ByteCode {
 					RetNone => break Ok(Variant::None),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = vars.get(*iter as usize).ok_or(err_roob())?;
-						let mut iter = iter.iter().map_err(err_call)?;
+						let mut iter = iter.iter().map_err(err::call)?;
 						if let Some(e) = iter.next() {
 							*vars.get_mut(*reg as usize).ok_or(err_roob())? = e;
 							iterators.push(iter);
@@ -273,5 +272,15 @@ impl Debug for CallArgs {
 		} else {
 			write!(f, "none, \"{}\", {:?}", self.func, self.args)
 		}
+	}
+}
+
+mod err {
+	use super::*;
+
+	#[inline(never)]
+	#[cold]
+	pub fn call(e: CallError) -> RunError {
+		RunError::CallError(Box::new(e))
 	}
 }
