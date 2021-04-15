@@ -146,6 +146,8 @@ impl PartialEq<Self> for Variant {
 			(Real(a), Integer(b)) => *a == *b as f64,
 			(Integer(a), Real(b)) => *a as f64 == *b,
 			(Integer(a), Integer(b)) => a == b,
+			(String(a), String(b)) => a == b,
+			(Char(a), Char(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -162,41 +164,60 @@ impl PartialOrd<Self> for Variant {
 			(Real(a), Integer(b)) => a.partial_cmp(&(*b as f64)),
 			(Integer(a), Real(b)) => (*a as f64).partial_cmp(b),
 			(Integer(a), Integer(b)) => a.partial_cmp(b),
+			(String(a), String(b)) => a.partial_cmp(b),
+			(Char(a), Char(b)) => a.partial_cmp(b),
 			_ => Option::None,
 		}
 	}
 }
 
-impl Variant {
-	pub fn call(
-		&self,
-		function: &str,
-		args: &[Variant],
-		env: &Environment,
-	) -> Result<Variant, CallError> {
-		match self {
-			Variant::None => Err(CallError::IsEmpty),
-			Variant::Bool(_) => Err(CallError::UndefinedFunction),
-			Variant::Real(r) => match function {
-				"sqrt" => {
-					check_arg_count!(args, 0);
-					Ok(Variant::Real(r.sqrt()))
+macro_rules! call_tbl {
+	{
+		$var:ident
+		$(
+			[$variant:ident]
+			$(
+				$func:ident [$arg_count:expr] => $code:block
+			)*
+		)*
+	} => {
+		impl Variant {
+			#[allow(unused_variables)]
+			pub fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult {
+				match self {
+					Variant::None => Err(CallError::IsEmpty),
+					$(
+						Variant::$variant($var) => match function {
+							$(
+								stringify!($func) => {
+									check_arg_count!(args, $arg_count);
+									Ok($code)
+								}
+							)*
+							_ => Err(CallError::UndefinedFunction),
+						}
+					)*
 				}
-				_ => Err(CallError::UndefinedFunction),
-			},
-			Variant::Integer(_) => Err(CallError::UndefinedFunction),
-			Variant::Char(_) => Err(CallError::UndefinedFunction),
-			Variant::String(s) => match function {
-				"len" => {
-					check_arg_count!(args, 0);
-					Ok(Variant::Integer(s.len() as isize))
-				}
-				_ => Err(CallError::UndefinedFunction),
-			},
-			Variant::Object(o) => o.call(function, args, env),
+			}
 		}
-	}
+	};
+}
 
+call_tbl! {
+	var
+	[Bool]
+	[Real]
+	abs [0] => { Variant::Real(var.abs()) }
+	sqrt [0] => { Variant::Real(var.sqrt()) }
+	[Integer]
+	abs [0] => { Variant::Integer(var.abs()) }
+	[Char]
+	[String]
+	len [0] => { Variant::Integer(var.len() as isize) }
+	[Object]
+}
+
+impl Variant {
 	pub fn iter(&self) -> Result<Box<dyn Iterator<Item = Variant>>, CallError> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
