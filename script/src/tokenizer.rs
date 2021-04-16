@@ -62,6 +62,12 @@ pub enum Token<'src> {
 	Comma,
 	Pass,
 	Colon,
+	Break,
+	Continue,
+	As,
+	Is,
+	Try,
+	Catch,
 }
 
 #[derive(Debug, PartialEq)]
@@ -269,6 +275,12 @@ impl Token<'_> {
 							"fn" => Token::Fn,
 							"return" => Token::Return,
 							"pass" => Token::Pass,
+							"continue" => Token::Continue,
+							"break" => Token::Break,
+							"as" => Token::As,
+							"is" => Token::Is,
+							"try" => Token::Try,
+							"catch" => Token::Catch,
 							_ => Token::Name(s),
 						},
 						i as u32,
