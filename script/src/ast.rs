@@ -1,4 +1,5 @@
 use crate::tokenizer::*;
+use core::convert::TryInto;
 
 type Integer = isize;
 type Real = f64;
@@ -47,6 +48,12 @@ pub(crate) enum Statement<'src> {
 	},
 	Return {
 		expr: Option<Expression<'src>>,
+	},
+	Continue {
+		levels: u8
+	},
+	Break {
+		levels: u8,
 	},
 }
 
@@ -326,6 +333,29 @@ impl<'src> Function<'src> {
 						}
 						Some(tk) => err!(UnexpectedToken, tk, tokens),
 						None => err!(UnexpectedEOF, tokens),
+					}
+				}
+				Some(tk) if tk == Token::Continue || tk == Token::Break => {
+					let levels = match tokens.next() {
+						Some(Token::Number(num)) => {
+							match parse_number(num) {
+								Ok(Atom::Integer(num)) => num.try_into().expect("TODO handle num > u8::MAX"),
+								Ok(Atom::Real(_)) => err!(UnexpectedToken, Token::Number(num), tokens),
+								Err(_) => err!(NotANumber, tokens),
+								_ => unreachable!(),
+							}
+						}
+						Some(Token::Indent(_)) => {
+							tokens.prev();
+							0
+						}
+						None => 0,
+						tk => err!(UnexpectedToken, tk, tokens),
+					};
+					match tk {
+						Token::Continue => lines.push(Statement::Continue { levels }),
+						Token::Break => lines.push(Statement::Break { levels }),
+						_ => unreachable!(),
 					}
 				}
 				None => return Ok((lines, 0)),

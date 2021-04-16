@@ -11,6 +11,7 @@ pub fn main() -> Result<(), io::Error> {
 		match fs::read_to_string(file) {
 			Ok(source) => match ballscript::parse(&source) {
 				Ok(script) => {
+					dbg!(&script);
 					let script = script.instance();
 					match script.call("main", &[], &env) {
 						Ok(_) => Ok(()),

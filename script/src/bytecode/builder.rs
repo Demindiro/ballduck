@@ -2,6 +2,7 @@ use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
+use core::num::NonZeroU8;
 use rustc_hash::FxHashMap;
 use unwrap_none::UnwrapNone;
 
@@ -14,6 +15,12 @@ pub(crate) struct ByteCodeBuilder<'e, 's> {
 	curr_var_count: u16,
 	min_var_count: u16,
 	param_count: u16,
+	loops: Vec<LoopContext>,
+}
+
+struct LoopContext {
+	continues: Vec<u32>,
+	breaks: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -21,6 +28,8 @@ pub enum ByteCodeError {
 	DuplicateParameter,
 	DuplicateVar,
 	UndefinedVariable,
+	UnexpectedBreak,
+	UnexpectedContinue,
 }
 
 impl<'e, 's> ByteCodeBuilder<'e, 's> {
@@ -38,6 +47,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 			locals,
 			methods,
 			param_count: function.parameters.len() as u16,
+			loops: Vec::new(),
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -128,13 +138,40 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						.push(Instruction::Iter(var_reg, iter_reg, u32::MAX));
 					let ic = self.instr.len() - 1;
 					let ip = self.instr.len() as u32;
+
+					// Parse loop block
+					self.loops.push(LoopContext {
+						continues: Vec::new(),
+						breaks: Vec::new(),
+					});
 					self.parse_block(lines)?;
+					let context = self.loops.pop().unwrap();
+
+					// Make `continue`s jump to the `IterJmp` instruction
+					for i in context.continues {
+						let ip = self.instr.len() as u32;
+						match self.instr.get_mut(i as usize) {
+							Some(Instruction::Jmp(ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
+					}
+
+					// Insert `IterJmp` instruction & update the `Iter` with the end address.
 					self.instr.push(Instruction::IterJmp(var_reg, ip));
 					let ip = self.instr.len() as u32;
 					match self.instr.get_mut(ic) {
 						Some(Instruction::Iter(_, _, ic)) => *ic = ip,
 						_ => unreachable!(),
 					}
+
+					// Make `break`s jump to right after the `IterJmp` instruction
+					for i in context.breaks {
+						match self.instr.get_mut(i as usize) {
+							Some(Instruction::Jmp(ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
+					}
+
 					self.curr_var_count = og_cvc;
 				}
 				Statement::If {
@@ -259,6 +296,18 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					self.instr
 						.push(Instruction::SetIndex(expr_reg, var, index_reg));
 					self.curr_var_count = og_cvc;
+				}
+				Statement::Continue { levels } => {
+					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
+					let c = self.loops.get_mut(i).ok_or(ByteCodeError::UnexpectedContinue)?;
+					c.continues.push(self.instr.len() as u32);
+					self.instr.push(Instruction::Jmp(u32::MAX));
+				}
+				Statement::Break { levels } => {
+					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
+					let c = self.loops.get_mut(i).ok_or(ByteCodeError::UnexpectedBreak)?;
+					c.breaks.push(self.instr.len() as u32);
+					self.instr.push(Instruction::Jmp(u32::MAX));
 				}
 			}
 		}

@@ -162,3 +162,13 @@ impl ScriptType for Instance {
 		}
 	}
 }
+
+impl fmt::Debug for Class {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if f.alternate() {
+			write!(f, "{:#?}", self.0.functions)
+		} else {
+			write!(f, "{:?}", self.0.functions)
+		}
+	}
+}
