@@ -3,6 +3,7 @@ name = "ballduck_script"
 version = "0.1.0"
 authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
 edition = "2018"
+license = "MIT"
 
 [dependencies]
 rustc-hash = "*"
