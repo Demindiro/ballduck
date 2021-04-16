@@ -20,6 +20,7 @@ pub enum Op {
 	ShiftLeft,
 	ShiftRight,
 	Access,
+	Index,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -86,7 +87,8 @@ impl Op {
 	fn precedence(&self) -> i8 {
 		use Op::*;
 		match *self {
-			Access => 12,
+			Access => 13,
+			Index => 12,
 			Not => 11,
 			Mul | Div | Rem => 10,
 			Add | Sub => 9,

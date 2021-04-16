@@ -8,13 +8,15 @@ mod bytecode;
 mod environment;
 mod script;
 mod tokenizer;
+mod types;
 mod variant;
 
 pub use bytecode::CallResult;
 pub use environment::Environment;
 use rustc_hash::FxHashMap;
 use script::Script;
-pub use script::{CallError, Class, ScriptIter, ScriptObject, ScriptType};
+pub use script::{CallError, Class, ScriptObject, ScriptType};
+pub use types::{Array, Dictionary};
 pub use variant::Variant;
 
 use bytecode::ByteCodeBuilder;

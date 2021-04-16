@@ -26,6 +26,12 @@ pub(crate) enum Statement<'src> {
 		assign_op: AssignOp,
 		expr: Expression<'src>,
 	},
+	AssignIndex {
+		var: &'src str,
+		index: Expression<'src>,
+		assign_op: AssignOp,
+		expr: Expression<'src>,
+	},
 	Expression {
 		expr: Expression<'src>,
 	},
@@ -52,7 +58,7 @@ pub(crate) enum Atom<'src> {
 	String(&'src str),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum Expression<'src> {
 	Atom(Atom<'src>),
 	Operation {
@@ -65,6 +71,7 @@ pub(crate) enum Expression<'src> {
 		name: &'src str,
 		arguments: Vec<Expression<'src>>,
 	},
+	Array(Vec<Expression<'src>>),
 }
 
 #[derive(Debug)]
@@ -189,6 +196,25 @@ impl<'src> Function<'src> {
 						let expr = Expression::parse(tokens)?;
 						lines.push(Statement::Expression { expr });
 					}
+					Some(Token::BracketSquareOpen) => {
+						let expr = Expression::Atom(Atom::Name(name));
+						let expr = Expression::parse_index_op(expr, tokens)?;
+						if let Some(Token::Assign(assign_op)) = tokens.next() {
+							if let Expression::Operation { right, .. } = expr {
+								lines.push(Statement::AssignIndex {
+									var: name,
+									index: *right,
+									assign_op,
+									expr: Expression::parse(tokens)?,
+								});
+							} else {
+								unreachable!();
+							}
+						} else {
+							tokens.prev();
+							lines.push(Statement::Expression { expr });
+						}
+					}
 					Some(Token::Assign(op)) => match op {
 						AssignOp::None => lines.push(Statement::Assign {
 							var: name,
@@ -283,15 +309,17 @@ impl<'src> Function<'src> {
 					};
 					lines.push(Statement::Declare { var });
 					match tokens.next() {
-						Some(Token::Assign(assign_op)) => {
-							match assign_op {
-								AssignOp::None => {
-									let expr = Expression::parse(tokens)?;
-									lines.push(Statement::Assign { var, assign_op, expr });
-								}
-								op => todo!("{:?}", op),
+						Some(Token::Assign(assign_op)) => match assign_op {
+							AssignOp::None => {
+								let expr = Expression::parse(tokens)?;
+								lines.push(Statement::Assign {
+									var,
+									assign_op,
+									expr,
+								});
 							}
-						}
+							op => todo!("{:?}", op),
+						},
 						Some(Token::Indent(_)) => {
 							tokens.prev();
 						}
@@ -330,35 +358,6 @@ impl<'src> Expression<'src> {
 			}
 		};
 		let expr_name = |n| Expression::Atom(Atom::Name(n));
-		fn parse_fn_args<'src>(
-			tokens: &mut TokenStream<'src>,
-		) -> Result<Vec<Expression<'src>>, Error> {
-			let mut args = Vec::new();
-			loop {
-				match tokens.next() {
-					Some(Token::BracketRoundClose) => break,
-					Some(_) => {
-						tokens.prev();
-						let expr = Expression::parse(tokens)?;
-						args.push(expr);
-					}
-					e => todo!("{:?}", e),
-				};
-				match tokens.next() {
-					Some(Token::Comma) => (),
-					Some(Token::BracketRoundClose) => break,
-					Some(tk) => {
-						dbg!(tk);
-						todo!()
-					} //err!(UnexpectedToken, tk, tokens),
-					tk => {
-						dbg!(tk, args);
-						todo!()
-					}
-				}
-			}
-			Ok(args)
-		}
 
 		let lhs = match tokens.next() {
 			Some(Token::BracketRoundOpen) => {
@@ -371,13 +370,21 @@ impl<'src> Expression<'src> {
 			Some(Token::String(s)) => Self::Atom(Atom::String(s)),
 			Some(Token::Number(n)) => expr_num(n, tokens, line!())?,
 			Some(Token::Name(name)) => match tokens.next() {
-				Some(Token::BracketRoundOpen) => expr_fn(None, name, parse_fn_args(tokens)?),
+				Some(Token::BracketRoundOpen) => expr_fn(
+					None,
+					name,
+					Self::parse_expr_list(tokens, Token::BracketRoundClose)?,
+				),
+				Some(Token::BracketSquareOpen) => Self::parse_index_op(expr_name(name), tokens)?,
 				Some(_) => {
 					tokens.prev();
 					expr_name(name)
 				}
 				e => todo!("{:?}", e),
 			},
+			Some(Token::BracketSquareOpen) => {
+				Self::Array(Self::parse_expr_list(tokens, Token::BracketSquareClose)?)
+			}
 			e => todo!("{:?}", e),
 		};
 
@@ -400,7 +407,7 @@ impl<'src> Expression<'src> {
 								e => todo!("{:?}", e),
 							},
 							Some(Token::BracketRoundOpen) => {
-								let args = parse_fn_args(tokens)?;
+								let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
 								match opl {
 									Op::Access => Ok(expr_fn(Some(lhs), og_mid, args)),
 									op => Ok(expr_op(lhs, op, expr_fn(None, og_mid, args))),
@@ -409,6 +416,29 @@ impl<'src> Expression<'src> {
 							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 								tokens.prev();
 								Ok(expr_op(lhs, opl, mid))
+							}
+							Some(Token::BracketSquareOpen) => {
+								let mid = Self::parse_index_op(mid, tokens)?;
+								dbg!(&lhs, &opl, &mid);
+								match tokens.next() {
+									Some(Token::Op(opr)) => match tokens.next() {
+										Some(Token::Name(rhs)) => Self::parse_tri_op(
+											lhs,
+											opl,
+											mid,
+											opr,
+											Self::new_name(rhs),
+											tokens,
+										),
+										e => todo!("{:?}", e),
+									}
+									Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+										tokens.prev();
+										Ok(expr_op(lhs, opl, mid))
+									}
+									None => Ok(expr_op(lhs, opl, mid)),
+									e => todo!("{:?}", e),
+								}
 							}
 							None => Ok(expr_op(lhs, opl, mid)),
 							e => todo!("{:?}", e),
@@ -442,7 +472,7 @@ impl<'src> Expression<'src> {
 					},
 					e => todo!("{:?}", e),
 				},
-				Token::BracketRoundClose | Token::Indent(_) => {
+				Token::BracketRoundClose | Token::BracketSquareClose | Token::Indent(_) => {
 					tokens.prev();
 					Ok(lhs)
 				}
@@ -488,6 +518,52 @@ impl<'src> Expression<'src> {
 
 	fn new_name(n: &'src str) -> Self {
 		Self::Atom(Atom::Name(n))
+	}
+
+	fn parse_expr_list(
+		tokens: &mut TokenStream<'src>,
+		end_token: Token,
+	) -> Result<Vec<Self>, Error> {
+		let mut args = Vec::new();
+		loop {
+			match tokens.next() {
+				Some(tk) if tk == end_token => break,
+				Some(_) => {
+					tokens.prev();
+					let expr = Expression::parse(tokens)?;
+					args.push(expr);
+				}
+				e => todo!("{:?}", e),
+			};
+			match tokens.next() {
+				Some(Token::Comma) => (),
+				Some(tk) if tk == end_token => break,
+				Some(tk) => {
+					dbg!(tk);
+					todo!()
+				} //err!(UnexpectedToken, tk, tokens),
+				tk => {
+					dbg!(tk, args);
+					todo!()
+				}
+			}
+		}
+		Ok(args)
+	}
+
+	/// This function only parses what is between '[' and ']'. It is useful for expressions such
+	/// as `a[0] * a[1]` that are hard to parse in one go using `parse_tri_op` or the like.
+	/// The preceding '[' is meant to be consumed before calling this function.
+	fn parse_index_op(var: Self, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		let expr = Self::Operation {
+			op: Op::Index,
+			left: Box::new(var),
+			right: Box::new(Self::parse(tokens)?),
+		};
+		if tokens.next() != Some(Token::BracketSquareClose) {
+			err!(ExpectedToken, Token::BracketSquareClose, tokens);
+		}
+		Ok(expr)
 	}
 }
 

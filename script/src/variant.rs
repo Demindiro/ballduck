@@ -235,6 +235,20 @@ impl Variant {
 			_ => Err(CallError::IncompatibleType),
 		}
 	}
+
+	pub fn index(&self, index: &Variant) -> CallResult {
+		match self {
+			Self::Object(obj) => obj.index(index),
+			_ => Err(CallError::IncompatibleType),
+		}
+	}
+
+	pub fn set_index(&self, index: &Variant, value: Variant) -> Result<(), CallError> {
+		match self {
+			Self::Object(obj) => obj.set_index(index, value),
+			_ => Err(CallError::IncompatibleType),
+		}
+	}
 }
 
 impl fmt::Display for Variant {
@@ -247,7 +261,8 @@ impl fmt::Display for Variant {
 			Variant::Integer(n) => write!(f, "{}", n),
 			Variant::Char(n) => write!(f, "{}", n),
 			Variant::String(n) => write!(f, "{}", n),
-			Variant::Object(n) => write!(f, "{:?}", n),
+			//Variant::Object(n) => write!(f, "{}", n),
+			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}
 }

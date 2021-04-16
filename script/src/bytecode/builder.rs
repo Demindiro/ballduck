@@ -87,11 +87,13 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					| Eq(_, a, b)
 					| Neq(_, a, b)
 					| Less(_, a, b)
-					| LessEq(_, a, b) => {
+					| LessEq(_, a, b)
+					| SetIndex(a, _, b)
+					| GetIndex(a, _, b) => {
 						conv(a);
 						conv(b);
 					}
-					IterJmp(_, _) | Jmp(_) | RetNone => (),
+					IterJmp(_, _) | Jmp(_) | RetNone | NewArray(_, _) => (),
 				}
 			}
 		}
@@ -223,6 +225,48 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						return Err(ByteCodeError::DuplicateVar);
 					}
 				}
+				Statement::AssignIndex {
+					var,
+					index,
+					assign_op,
+					expr,
+				} => {
+					assert_eq!(*assign_op, AssignOp::None, "TODO handle assign ops");
+					let og_cvc = self.curr_var_count;
+
+					let index_reg = self.curr_var_count;
+					let expr_reg = self.curr_var_count + 1;
+					self.curr_var_count += 2;
+					let index = self.parse_expression(Some(index_reg), index)?;
+					let index_reg = if let Some(reg) = index {
+						self.curr_var_count -= 1;
+						reg
+					} else {
+						index_reg
+					};
+					let expr_reg = if let Some(reg) = self.parse_expression(Some(expr_reg), expr)? {
+						self.curr_var_count -= 1;
+						reg
+					} else {
+						expr_reg
+					};
+
+					let var = if let Some(&reg) = self.vars.get(var) {
+						reg
+					} else if let Some(local) = self.locals.get(var as &str) {
+						let reg = self.curr_var_count;
+						self.curr_var_count += 1;
+						self.instr.push(Instruction::Load(reg, *local));
+						self.min_var_count = self.min_var_count.max(self.curr_var_count);
+						reg
+					} else {
+						return Err(ByteCodeError::UndefinedVariable);
+					};
+
+					self.instr
+						.push(Instruction::SetIndex(expr_reg, var, index_reg));
+					self.curr_var_count = og_cvc;
+				}
 			}
 		}
 		self.min_var_count = self.min_var_count.max(self.vars.len() as u16);
@@ -275,6 +319,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					Op::LessEq => Instruction::LessEq(store, left, right),
 					Op::GreaterEq => Instruction::LessEq(store, right, left),
 					Op::Not | Op::AndThen | Op::OrElse => todo!(),
+					Op::Index => Instruction::GetIndex(store, left, right),
 					Op::Access => panic!("{:?} is not an actual op (bug in AST)", Op::Access),
 				});
 				self.curr_var_count = og_cvc;
@@ -338,11 +383,37 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				self.curr_var_count = og_cvc;
 				Ok(None)
 			}
+			Expression::Array(array) => {
+				let og_cvc = self.curr_var_count;
+				let array_reg = self.curr_var_count;
+				self.curr_var_count += 1;
+				self.instr
+					.push(Instruction::NewArray(array_reg, array.len()));
+				for (i, expr) in array.iter().enumerate() {
+					let r = self.curr_var_count;
+					self.curr_var_count += 1;
+					let r = if let Some(e) = self.parse_expression(Some(r), expr)? {
+						self.curr_var_count -= 1;
+						e
+					} else {
+						r
+					};
+					self.update_min_vars();
+					let i = self.add_const(Variant::Integer(i as isize));
+					self.instr.push(Instruction::SetIndex(r, array_reg, i));
+				}
+				self.curr_var_count = og_cvc;
+				Ok(Some(array_reg))
+			}
 		}
 	}
 
 	fn add_const(&mut self, var: Variant) -> u16 {
 		self.consts.push(var);
 		u16::MAX - self.consts.len() as u16 + 1
+	}
+
+	fn update_min_vars(&mut self) {
+		self.min_var_count = self.min_var_count.max(self.curr_var_count);
 	}
 }

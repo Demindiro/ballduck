@@ -3,10 +3,12 @@ mod builder;
 pub(crate) use builder::ByteCodeBuilder;
 
 use crate::script::CallError;
+use crate::Array;
 use crate::{Environment, Variant};
 use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
+use std::rc::Rc;
 
 struct CallArgs {
 	store_in: Option<u16>,
@@ -46,6 +48,10 @@ enum Instruction {
 	Store(u16, u16),
 	Load(u16, u16),
 	Move(u16, u16),
+
+	NewArray(u16, usize),
+	GetIndex(u16, u16, u16),
+	SetIndex(u16, u16, u16),
 }
 
 #[derive(Debug)]
@@ -243,6 +249,17 @@ impl ByteCode {
 							.clone();
 					}
 					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
+					NewArray(r, c) => {
+						reg!(mut vars r) = Variant::Object(Rc::new(Array::with_len(*c)))
+					}
+					GetIndex(r, o, i) => {
+						reg!(mut vars r) = reg!(ref vars o)
+							.index(reg!(ref vars i))
+							.map_err(err::call)?
+					}
+					SetIndex(r, o, i) => reg!(ref vars o)
+						.set_index(reg!(ref vars i), reg!(ref vars r).clone())
+						.map_err(err::call)?,
 				}
 			} else {
 				break Err(RunError::IpOutOfBounds);
@@ -286,6 +303,10 @@ impl Debug for Instruction {
 			Store(r, a) => write!(f, "store   {}, {}", r, a),
 			Load(r, a) => write!(f, "load    {}, {}", r, a),
 			Move(a, b) => write!(f, "move    {}, {}", a, b),
+
+			NewArray(r, c) => write!(f, "newarr  {}, {}", r, c),
+			GetIndex(r, o, i) => write!(f, "geti    {}, {}, {}", r, o, i),
+			SetIndex(r, o, i) => write!(f, "seti    {}, {}, {}", r, o, i),
 		}
 	}
 }

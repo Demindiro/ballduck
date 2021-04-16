@@ -1,7 +1,7 @@
 use crate::bytecode::{ByteCode, CallResult, RunError};
 use crate::{Environment, Variant};
 use core::any::{Any, TypeId};
-use core::fmt::Debug;
+use core::fmt;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -49,19 +49,17 @@ pub enum CallError {
 	AlreadyBorrowed,
 }
 
-pub trait ScriptType: Debug + 'static {
-	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult<CallError>;
-
-	fn dup(&self) -> ScriptObject;
+pub trait ScriptType: fmt::Debug + 'static {
+	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult;
 
 	#[inline]
-	fn mul(&self, rhs: &ScriptObject) -> CallResult<CallError> {
+	fn mul(&self, rhs: &ScriptObject) -> CallResult {
 		let _ = rhs;
 		Err(CallError::InvalidOperator)
 	}
 
 	#[inline]
-	fn add(&self, rhs: &ScriptObject) -> CallResult<CallError> {
+	fn add(&self, rhs: &ScriptObject) -> CallResult {
 		let _ = rhs;
 		Err(CallError::InvalidOperator)
 	}
@@ -69,6 +67,22 @@ pub trait ScriptType: Debug + 'static {
 	#[inline]
 	fn type_id(&self) -> TypeId {
 		Any::type_id(self)
+	}
+
+	#[inline]
+	fn index(&self, index: &Variant) -> CallResult {
+		let _ = index;
+		Err(CallError::IncompatibleType)
+	}
+
+	#[inline]
+	fn set_index(&self, index: &Variant, value: Variant) -> Result<(), CallError> {
+		let _ = (index, value);
+		Err(CallError::IncompatibleType)
+	}
+
+	fn to_string(&self) -> String {
+		std::any::type_name::<Self>().into()
 	}
 }
 
@@ -91,12 +105,6 @@ impl dyn ScriptType + 'static {
 	}
 }
 
-pub trait ScriptIter: Debug {
-	fn iter(&self) -> ScriptIterator;
-}
-
-pub type ScriptIterator<'a> = Box<dyn Iterator<Item = Variant> + 'a>;
-
 impl Script {
 	pub(crate) fn new(locals: FxHashMap<Box<str>, u16>) -> Self {
 		Self {
@@ -111,7 +119,7 @@ impl Script {
 		locals: &mut [Variant],
 		args: &[Variant],
 		env: &Environment,
-	) -> Result<Variant, CallError> {
+	) -> CallResult {
 		if let Some(function) = self.functions.get(function) {
 			function
 				.run(&self.functions, locals, args, &env)
@@ -146,9 +154,5 @@ impl ScriptType for Instance {
 		} else {
 			Err(CallError::AlreadyBorrowed)
 		}
-	}
-
-	fn dup(&self) -> ScriptObject {
-		todo!();
 	}
 }
