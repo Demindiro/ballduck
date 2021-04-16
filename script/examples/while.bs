@@ -1,0 +1,11 @@
+fn main()
+	var to_x = 4
+	var to_y = 4
+	var x = 0
+	var y = 0
+	while x < to_x
+		while y < to_y
+			print(x, " ", y)
+			y = y + 1
+		y = 0
+		x = x + 1

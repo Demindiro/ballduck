@@ -17,7 +17,6 @@ use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
-use core::num::NonZeroU8;
 use rustc_hash::FxHashMap;
 use unwrap_none::UnwrapNone;
 
