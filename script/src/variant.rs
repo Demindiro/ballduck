@@ -228,10 +228,7 @@ impl Variant {
 					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
 				}
 			}
-			Variant::String(s) => Ok({
-				let s = StringIter::new(s.clone());
-				Box::new(s.iter.map(|c| Variant::Char(c)))
-			}),
+			Variant::String(s) => Ok(Box::new(StringIter::new(s.clone()))),
 			_ => Err(CallError::IncompatibleType),
 		}
 	}
@@ -283,5 +280,13 @@ impl<'a> StringIter<'a> {
 				iter,
 			}
 		}
+	}
+}
+
+impl Iterator for StringIter<'_> {
+	type Item = Variant;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next().map(Variant::Char)
 	}
 }
