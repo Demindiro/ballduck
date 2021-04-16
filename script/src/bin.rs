@@ -1,3 +1,18 @@
+// Copyright (C) 2021  David Hoppenbrouwers
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 use ballscript::{Environment, ScriptType, Variant};
 use std::env;
 use std::fs;
@@ -11,7 +26,6 @@ pub fn main() -> Result<(), io::Error> {
 		match fs::read_to_string(file) {
 			Ok(source) => match ballscript::parse(&source) {
 				Ok(script) => {
-					dbg!(&script);
 					let script = script.instance();
 					match script.call("main", &[], &env) {
 						Ok(_) => Ok(()),
