@@ -1,11 +1,13 @@
 # Scripting in Ballduck
 
+<!--
 Ballduck offers a simple scripting language optimized for prototyping and
 overall development speed. It is useful as a "glue" between components that
 would be too tedious to implement in Rust.
 
 To attach scripts to a Node, it needs a `ScriptComponent`. This Component can
 hold any number of scripts.
+-->
 
 
 ## Syntax
@@ -103,7 +105,7 @@ By default, they use the native platform size (i.e. 64 bit on x86\_64,
 
 ### Arrays
 
-Arrays are internally defined as `Vec<Box<dyn ScriptType>>`, which means
+Arrays are internally defined as `Rc<RefCell<Vec<Variant>>>`, which means
 they can hold any type.
 
 Arrays can be created using:
@@ -117,7 +119,7 @@ Arrays can be created using:
 
 ### Dictionaries
 
-Dictionaries are internally defined as `HashMap<Box<dyn ScriptType + Hash + Eq>, Box<dyn ScriptType>>`.
+Dictionaries are internally defined as `Rc<RefCell<HashMap<VariantOrd, Variant>>>`.
 Again, this means that they can hold any type. The keys mush implement `Hash`
 and `Eq` though.
 
@@ -129,8 +131,7 @@ Dictionaries can be created using:
 {a: b,}
 ```
 
-Note that floating point numbers do not implement `Eq` and hence cannot be
-used as keys.
+Currently, only integers, booleans and strings can be used as keys.
 
 
 ### Boolean
@@ -165,17 +166,18 @@ a code block until the expression evaluates to `false`.
 
 ### `for`
 
-This structure will iterate types that implement `ScriptIter`. If the type
-does not implement `ScriptIter`, an error will be thrown.
+This structure will iterate types that implement the `iter` method. If
+the type is not iterable, an error will be thrown.
 
 ```ballscript
-for i in 10:
+for i in 10
 	...
-for v in [42, "foo"]:
+for v in [42, "foo"]
 	...
-for k in {"bar": "qux", 13: 37}:
+for k in {"bar": "qux", 13: 37}
 	...
 ```
 
 ## Creating custom types in Rust
 
+To expose a Rust type to Ballscript, it must implement the `ScriptType` trait.
