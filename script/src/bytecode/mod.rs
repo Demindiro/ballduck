@@ -54,7 +54,6 @@ enum Instruction {
 	SetIndex(u16, u16, u16),
 }
 
-#[derive(Debug)]
 pub(crate) struct ByteCode {
 	code: Vec<Instruction>,
 	param_count: u16,
@@ -211,6 +210,8 @@ impl ByteCode {
 						if let Some(e) = iter.next() {
 							reg!(mut vars reg) = e;
 							ip = *jmp_ip;
+						} else {
+							let _ = iterators.pop().unwrap();
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
@@ -318,6 +319,38 @@ impl Debug for CallArgs {
 		} else {
 			write!(f, "none, \"{}\", {:?}", self.func, self.args)
 		}
+	}
+}
+
+impl fmt::Debug for ByteCode {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let br = |f: &mut fmt::Formatter| f.write_str(if f.alternate() { "\n" } else { ", " });
+		if f.alternate() {
+			f.write_str("\n")?;
+		}
+		write!(f, "parameters: {}", self.param_count)?;
+		br(f)?;
+		write!(f, "mutable variables: {}", self.var_count)?;
+		br(f)?;
+		f.write_str("consts:")?;
+		for (i, c) in self.consts.iter().enumerate() {
+			let i = i as u16 + self.var_count;
+			if f.alternate() {
+				write!(f, "\n    {:>3}: {:?}", i, c)?;
+			} else {
+				write!(f, " {}: {:?},", i, c)?;
+			}
+		}
+		br(f)?;
+		f.write_str("code:")?;
+		for (i, c) in self.code.iter().enumerate() {
+			if f.alternate() {
+				write!(f, "\n    {:>3}: {:?}", i, c)?;
+			} else {
+				write!(f, "{}: {:?}", i, c)?;
+			}
+		}
+		Ok(())
 	}
 }
 
