@@ -22,6 +22,7 @@ enum Instruction {
 
 	Jmp(u32),
 	JmpIf(u16, u32),
+	JmpNotIf(u16, u32),
 	RetSome(u16),
 	RetNone,
 
@@ -223,6 +224,15 @@ impl ByteCode {
 							return Err(RunError::NotBoolean);
 						}
 					}
+					JmpNotIf(reg, jmp_ip) => {
+						if let Variant::Bool(b) = reg!(ref vars reg) {
+							if *b {
+								ip = *jmp_ip;
+							}
+						} else {
+							return Err(RunError::NotBoolean);
+						}
+					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
 					Add(r, a, b) => run_op!(vars, r = a + b),
 					Sub(r, a, b) => run_op!(vars, r = a - b),
@@ -287,6 +297,7 @@ impl Debug for Instruction {
 			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
 			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
+			JmpNotIf(r, p) => write!(f, "jmpnif  {}, {}", r, p),
 			Jmp(p) => write!(f, "jmp     {}", p),
 
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),

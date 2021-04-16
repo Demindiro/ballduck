@@ -78,6 +78,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						}
 					}
 					JmpIf(a, _)
+					| JmpNotIf(a, _)
 					| Iter(_, a, _)
 					| RetSome(a)
 					| Store(a, _)
@@ -124,6 +125,8 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Statement::For { var, expr, lines } => {
 					let og_cvc = self.curr_var_count;
+
+					// Parse expression
 					let (var_reg, iter_reg) = (self.curr_var_count, self.curr_var_count + 1);
 					self.curr_var_count += 2;
 					self.vars.insert(var, var_reg).unwrap_none();
@@ -165,6 +168,58 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					}
 
 					// Make `break`s jump to right after the `IterJmp` instruction
+					for i in context.breaks {
+						match self.instr.get_mut(i as usize) {
+							Some(Instruction::Jmp(ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
+					}
+
+					self.curr_var_count = og_cvc;
+				}
+				Statement::While { expr, lines } => {
+					let og_cvc = self.curr_var_count;
+
+					// Insert `Jmp` to the expr evaluation
+					let start_ip = self.instr.len();
+					self.instr.push(Instruction::Jmp(u32::MAX));
+
+					// Parse loop block
+					self.loops.push(LoopContext {
+						continues: Vec::new(),
+						breaks: Vec::new(),
+					});
+					self.parse_block(lines)?;
+					let context = self.loops.pop().unwrap();
+
+					// Make `continue`s jump to the expression evaluation
+					for i in context.continues {
+						let ip = self.instr.len() as u32;
+						match self.instr.get_mut(i as usize) {
+							Some(Instruction::Jmp(ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
+					}
+
+					// Update start jump
+					let ip = self.instr.len() as u32;
+					match self.instr.get_mut(start_ip) {
+						Some(Instruction::Jmp(ic)) => *ic = ip,
+						_ => unreachable!(),
+					}
+
+					// Parse expression
+					let expr_reg = self.curr_var_count;
+					self.curr_var_count += 1;
+					let expr_reg = if let Some(r) = self.parse_expression(Some(expr_reg), expr)? {
+						self.curr_var_count -= 1;
+						r
+					} else {
+						expr_reg
+					};
+					self.instr.push(Instruction::JmpNotIf(expr_reg, start_ip as u32 + 1));
+
+					// Make `break`s jump to right after the expression evaluation
 					for i in context.breaks {
 						match self.instr.get_mut(i as usize) {
 							Some(Instruction::Jmp(ic)) => *ic = ip,

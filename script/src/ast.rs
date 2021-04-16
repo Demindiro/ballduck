@@ -41,6 +41,10 @@ pub(crate) enum Statement<'src> {
 		expr: Expression<'src>,
 		lines: Lines<'src>,
 	},
+	While {
+		expr: Expression<'src>,
+		lines: Lines<'src>,
+	},
 	If {
 		expr: Expression<'src>,
 		lines: Lines<'src>,
@@ -246,6 +250,17 @@ impl<'src> Function<'src> {
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
 					lines.push(Statement::For {
 						var,
+						expr,
+						lines: blk,
+					});
+					if indent < expected_indent {
+						return Ok((lines, indent));
+					}
+				}
+				Some(Token::While) => {
+					let expr = Expression::parse(tokens)?;
+					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
+					lines.push(Statement::While {
 						expr,
 						lines: blk,
 					});
@@ -499,6 +514,9 @@ impl<'src> Expression<'src> {
 						},
 						Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 							tokens.prev();
+							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
+						}
+						None => {
 							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
 						}
 						e => todo!("{:?}", e),
