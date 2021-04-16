@@ -76,13 +76,19 @@ pub trait ScriptType: fmt::Debug + 'static {
 	}
 
 	#[inline]
-	fn set_index(&self, index: &Variant, value: Variant) -> Result<(), CallError> {
+	fn set_index(&self, index: &Variant, value: Variant) -> CallResult<()> {
 		let _ = (index, value);
 		Err(CallError::IncompatibleType)
 	}
 
+	#[inline]
 	fn to_string(&self) -> String {
 		std::any::type_name::<Self>().into()
+	}
+
+	#[inline]
+	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Variant>>> {
+		Err(CallError::IncompatibleType)
 	}
 }
 
@@ -148,7 +154,7 @@ impl From<Script> for Class {
 }
 
 impl ScriptType for Instance {
-	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult<CallError> {
+	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
 			self.script.call(function, &mut vars, args, env)
 		} else {

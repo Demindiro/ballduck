@@ -71,7 +71,8 @@ pub(crate) enum Expression<'src> {
 		name: &'src str,
 		arguments: Vec<Expression<'src>>,
 	},
-	Array(Vec<Expression<'src>>),
+	Array(Vec<Self>),
+	Dictionary(Vec<(Self, Self)>),
 }
 
 #[derive(Debug)]
@@ -385,6 +386,9 @@ impl<'src> Expression<'src> {
 			Some(Token::BracketSquareOpen) => {
 				Self::Array(Self::parse_expr_list(tokens, Token::BracketSquareClose)?)
 			}
+			Some(Token::BracketCurlyOpen) => {
+				Self::Dictionary(Self::parse_expr_map(tokens, Token::BracketCurlyClose)?)
+			}
 			e => todo!("{:?}", e),
 		};
 
@@ -419,7 +423,6 @@ impl<'src> Expression<'src> {
 							}
 							Some(Token::BracketSquareOpen) => {
 								let mid = Self::parse_index_op(mid, tokens)?;
-								dbg!(&lhs, &opl, &mid);
 								match tokens.next() {
 									Some(Token::Op(opr)) => match tokens.next() {
 										Some(Token::Name(rhs)) => Self::parse_tri_op(
@@ -431,7 +434,7 @@ impl<'src> Expression<'src> {
 											tokens,
 										),
 										e => todo!("{:?}", e),
-									}
+									},
 									Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 										tokens.prev();
 										Ok(expr_op(lhs, opl, mid))
@@ -472,12 +475,12 @@ impl<'src> Expression<'src> {
 					},
 					e => todo!("{:?}", e),
 				},
-				Token::BracketRoundClose | Token::BracketSquareClose | Token::Indent(_) => {
-					tokens.prev();
-					Ok(lhs)
-				}
-				// TODO is this correct?
-				Token::Comma => {
+				Token::BracketRoundClose
+				| Token::BracketSquareClose
+				| Token::BracketCurlyClose
+				| Token::Indent(_)
+				| Token::Comma
+				| Token::Colon => {
 					tokens.prev();
 					Ok(lhs)
 				}
@@ -534,6 +537,53 @@ impl<'src> Expression<'src> {
 					args.push(expr);
 				}
 				e => todo!("{:?}", e),
+			};
+			match tokens.next() {
+				Some(Token::Comma) => (),
+				Some(tk) if tk == end_token => break,
+				Some(tk) => {
+					dbg!(tk);
+					todo!()
+				} //err!(UnexpectedToken, tk, tokens),
+				tk => {
+					dbg!(tk, args);
+					todo!()
+				}
+			}
+		}
+		Ok(args)
+	}
+
+	/// Parses all items in the form of `key : value` separated by a `,` until `end_token`
+	/// is encountered. The start token must have been consumed already.
+	fn parse_expr_map(
+		tokens: &mut TokenStream<'src>,
+		end_token: Token,
+	) -> Result<Vec<(Self, Self)>, Error> {
+		let mut args = Vec::new();
+		loop {
+			let key = match tokens.next() {
+				Some(tk) if tk == end_token => break,
+				Some(_) => {
+					tokens.prev();
+					let expr = Expression::parse(tokens)?;
+					expr
+				}
+				e => todo!("{:?}", e),
+			};
+			match tokens.next() {
+				Some(Token::Colon) => (),
+				Some(tk) => err!(UnexpectedToken, tk, tokens),
+				None => err!(UnexpectedEOF, tokens),
+			}
+			match tokens.next() {
+				Some(tk) if tk == end_token => err!(UnexpectedToken, tk, tokens),
+				Some(_) => {
+					tokens.prev();
+					let expr = Expression::parse(tokens)?;
+					args.push((key, expr));
+				}
+				None => err!(UnexpectedEOF, tokens),
 			};
 			match tokens.next() {
 				Some(Token::Comma) => (),

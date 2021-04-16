@@ -61,6 +61,7 @@ pub enum Token<'src> {
 	Return,
 	Comma,
 	Pass,
+	Colon,
 }
 
 #[derive(Debug, PartialEq)]
@@ -147,6 +148,7 @@ impl Token<'_> {
 				'{' => Ok((Token::BracketCurlyOpen, start + 1)),
 				'}' => Ok((Token::BracketCurlyClose, start + 1)),
 				',' => Ok((Token::Comma, start + 1)),
+				':' => Ok((Token::Colon, start + 1)),
 				'"' => loop {
 					if let Some((i, c)) = chars.next() {
 						if c == '"' {

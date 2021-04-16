@@ -1,0 +1,16 @@
+fn main()
+	print("Array construction:")
+	var arr = [1, 2, 3]
+	print("  ", arr)
+
+	print("Setting array index:")
+	arr[1] = "duck"
+	print("  ", arr)
+
+	print("Iterating arrays:")
+	for e in arr
+		print("  ", e)
+
+	print("Using array elements in expressions:")
+	arr = arr[0] + arr[2]
+	print("  ", arr)

@@ -3,8 +3,7 @@ mod builder;
 pub(crate) use builder::ByteCodeBuilder;
 
 use crate::script::CallError;
-use crate::Array;
-use crate::{Environment, Variant};
+use crate::{Array, Dictionary, Environment, Variant};
 use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
@@ -50,6 +49,7 @@ enum Instruction {
 	Move(u16, u16),
 
 	NewArray(u16, usize),
+	NewDictionary(u16, usize),
 	GetIndex(u16, u16, u16),
 	SetIndex(u16, u16, u16),
 }
@@ -74,7 +74,7 @@ pub enum RunError {
 	LocalOutOfBounds,
 }
 
-pub type CallResult<E = CallError> = Result<Variant, E>;
+pub type CallResult<T = Variant> = Result<T, CallError>;
 
 #[cfg(not(feature = "unsafe-loop"))]
 macro_rules! reg {
@@ -122,7 +122,7 @@ impl ByteCode {
 		locals: &mut [Variant],
 		args: &[Variant],
 		env: &Environment,
-	) -> CallResult<RunError> {
+	) -> Result<Variant, RunError> {
 		if args.len() != self.param_count as usize {
 			return Err(RunError::IncorrectArgumentCount);
 		}
@@ -253,6 +253,10 @@ impl ByteCode {
 					NewArray(r, c) => {
 						reg!(mut vars r) = Variant::Object(Rc::new(Array::with_len(*c)))
 					}
+					NewDictionary(r, c) => {
+						let d = Rc::new(Dictionary::with_capacity(*c));
+						reg!(mut vars r) = Variant::Object(d);
+					}
 					GetIndex(r, o, i) => {
 						reg!(mut vars r) = reg!(ref vars o)
 							.index(reg!(ref vars i))
@@ -306,6 +310,7 @@ impl Debug for Instruction {
 			Move(a, b) => write!(f, "move    {}, {}", a, b),
 
 			NewArray(r, c) => write!(f, "newarr  {}, {}", r, c),
+			NewDictionary(r, c) => write!(f, "newdict {}, {}", r, c),
 			GetIndex(r, o, i) => write!(f, "geti    {}, {}, {}", r, o, i),
 			SetIndex(r, o, i) => write!(f, "seti    {}, {}, {}", r, o, i),
 		}

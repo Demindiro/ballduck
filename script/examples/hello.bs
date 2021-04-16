@@ -1,5 +1,2 @@
-let global_string # = "I am a script variable"
-
 fn main()
 	print("Hello, world!")
-	#print(global_string)

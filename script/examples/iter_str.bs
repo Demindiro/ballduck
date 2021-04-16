@@ -1,3 +1,5 @@
 fn main()
-	for c in "The quick brown fox jumps over the lazy dog"
+	var iter = "The quick brown fox jumps over the lazy dog"
+	for c in iter
+		iter = "This won't affect the current iteration"
 		print(c)

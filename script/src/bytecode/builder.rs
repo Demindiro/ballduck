@@ -2,7 +2,6 @@ use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
-use core::convert::TryInto;
 use rustc_hash::FxHashMap;
 use unwrap_none::UnwrapNone;
 
@@ -93,7 +92,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						conv(a);
 						conv(b);
 					}
-					IterJmp(_, _) | Jmp(_) | RetNone | NewArray(_, _) => (),
+					IterJmp(_, _) | Jmp(_) | RetNone | NewArray(_, _) | NewDictionary(_, _) => (),
 				}
 			}
 		}
@@ -115,28 +114,22 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Statement::For { var, expr, lines } => {
 					let og_cvc = self.curr_var_count;
-					let reg = self.vars.len().try_into().expect("Too many variables");
-					self.vars.insert(var, reg).unwrap_none();
+					let (var_reg, iter_reg) = (self.curr_var_count, self.curr_var_count + 1);
+					self.curr_var_count += 2;
+					self.vars.insert(var, var_reg).unwrap_none();
 					frame_vars.push(var);
-					self.curr_var_count += 1;
-					match expr {
-						Expression::Atom(a) => {
-							let c = match a {
-								Atom::String(a) => {
-									self.add_const(Variant::String(a.to_string().into()))
-								}
-								Atom::Integer(a) => self.add_const(Variant::Integer(*a)),
-								Atom::Real(a) => todo!("for Real({})", a),
-								Atom::Name(a) => todo!("for {:?}", a),
-							};
-							self.instr.push(Instruction::Iter(reg, c, u32::MAX));
-						}
-						_ => todo!(),
-					}
+					let iter_reg = if let Some(r) = self.parse_expression(Some(iter_reg), expr)? {
+						self.curr_var_count -= 1;
+						r
+					} else {
+						iter_reg
+					};
+					self.instr
+						.push(Instruction::Iter(var_reg, iter_reg, u32::MAX));
 					let ic = self.instr.len() - 1;
 					let ip = self.instr.len() as u32;
 					self.parse_block(lines)?;
-					self.instr.push(Instruction::IterJmp(reg, ip));
+					self.instr.push(Instruction::IterJmp(var_reg, ip));
 					let ip = self.instr.len() as u32;
 					match self.instr.get_mut(ic) {
 						Some(Instruction::Iter(_, _, ic)) => *ic = ip,
@@ -404,6 +397,33 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				self.curr_var_count = og_cvc;
 				Ok(Some(array_reg))
+			}
+			Expression::Dictionary(dict) => {
+				let og_cvc = self.curr_var_count;
+				let dict_reg = self.curr_var_count;
+				self.curr_var_count += 1;
+				self.instr
+					.push(Instruction::NewDictionary(dict_reg, dict.len()));
+				for (key_expr, val_expr) in dict.iter() {
+					let (k, v) = (self.curr_var_count, self.curr_var_count + 1);
+					self.curr_var_count += 2;
+					let k = if let Some(e) = self.parse_expression(Some(k), key_expr)? {
+						self.curr_var_count -= 1;
+						e
+					} else {
+						k
+					};
+					let v = if let Some(e) = self.parse_expression(Some(v), val_expr)? {
+						self.curr_var_count -= 1;
+						e
+					} else {
+						v
+					};
+					self.update_min_vars();
+					self.instr.push(Instruction::SetIndex(v, dict_reg, k));
+				}
+				self.curr_var_count = og_cvc;
+				Ok(Some(dict_reg))
 			}
 		}
 	}

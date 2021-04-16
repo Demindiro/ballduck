@@ -5,7 +5,7 @@ use core::fmt;
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 use std::rc::Rc;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 /// Variant type that encodes a few common types. Having the common types
 /// not be hidden behind a dyn trait improves performance greatly
 pub enum Variant {
@@ -218,7 +218,7 @@ call_tbl! {
 }
 
 impl Variant {
-	pub fn iter(&self) -> Result<Box<dyn Iterator<Item = Variant>>, CallError> {
+	pub fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Variant>>> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
 			&Variant::Integer(i) => {
@@ -229,6 +229,7 @@ impl Variant {
 				}
 			}
 			Variant::String(s) => Ok(Box::new(StringIter::new(s.clone()))),
+			Variant::Object(o) => o.iter(),
 			_ => Err(CallError::IncompatibleType),
 		}
 	}
@@ -240,7 +241,7 @@ impl Variant {
 		}
 	}
 
-	pub fn set_index(&self, index: &Variant, value: Variant) -> Result<(), CallError> {
+	pub fn set_index(&self, index: &Variant, value: Variant) -> CallResult<()> {
 		match self {
 			Self::Object(obj) => obj.set_index(index, value),
 			_ => Err(CallError::IncompatibleType),
@@ -248,8 +249,24 @@ impl Variant {
 	}
 }
 
+impl fmt::Debug for Variant {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Variant::None => f.write_str("none"),
+			Variant::Bool(false) => f.write_str("false"),
+			Variant::Bool(true) => f.write_str("true"),
+			Variant::Real(n) => write!(f, "{:?}", n),
+			Variant::Integer(n) => write!(f, "{:?}", n),
+			Variant::Char(n) => write!(f, "{:?}", n),
+			Variant::String(n) => write!(f, "{:?}", n),
+			//Variant::Object(n) => write!(f, "{}", n),
+			Variant::Object(n) => f.write_str(n.to_string().as_str()),
+		}
+	}
+}
+
 impl fmt::Display for Variant {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Variant::None => f.write_str("none"),
 			Variant::Bool(false) => f.write_str("false"),
@@ -257,16 +274,17 @@ impl fmt::Display for Variant {
 			Variant::Real(n) => write!(f, "{}", n),
 			Variant::Integer(n) => write!(f, "{}", n),
 			Variant::Char(n) => write!(f, "{}", n),
-			Variant::String(n) => write!(f, "{}", n),
+			Variant::String(n) => f.write_str(n),
 			//Variant::Object(n) => write!(f, "{}", n),
 			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}
 }
 
+// DO NOT REORDER THE FIELDS: the drop order is important!
 struct StringIter<'a> {
-	_string: Rc<str>,
 	iter: core::str::Chars<'a>,
+	_string: Rc<str>,
 }
 
 impl<'a> StringIter<'a> {
