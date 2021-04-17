@@ -8,13 +8,14 @@ use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
 use core::convert::{TryFrom, TryInto};
 use core::hash;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::{Entry, HashMap};
+use std::rc::Rc;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's> {
 	methods: &'e FxHashMap<&'e str, ()>,
-	locals: &'e FxHashMap<Box<str>, u16>,
+	locals: &'e FxHashMap<Rc<str>, u16>,
 	instr: Vec<Instruction>,
 	vars: FxHashMap<&'s str, u16>,
 	consts: Vec<Variant>,
@@ -23,6 +24,7 @@ pub(crate) struct ByteCodeBuilder<'e, 's> {
 	param_count: u16,
 	loops: Vec<LoopContext>,
 	const_map: FxHashMap<Constant, u16>,
+	string_map: &'e mut FxHashSet<Rc<str>>,
 }
 
 struct LoopContext {
@@ -53,7 +55,8 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 	pub(crate) fn parse(
 		function: Function,
 		methods: &'e FxHashMap<&'e str, ()>,
-		locals: &'e FxHashMap<Box<str>, u16>,
+		locals: &'e FxHashMap<Rc<str>, u16>,
+		string_map: &'e mut FxHashSet<Rc<str>>,
 	) -> Result<ByteCode, ByteCodeError> {
 		let mut builder = Self {
 			instr: Vec::new(),
@@ -66,6 +69,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 			param_count: function.parameters.len() as u16,
 			loops: Vec::new(),
 			const_map: HashMap::with_hasher(Default::default()),
+			string_map,
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -462,7 +466,10 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Atom::Real(r) => Ok(Some(self.add_const(Variant::Real(r)))),
 				Atom::Integer(i) => Ok(Some(self.add_const(Variant::Integer(i)))),
-				Atom::String(s) => Ok(Some(self.add_const(Variant::String(s.to_string().into())))),
+				Atom::String(s) => {
+					let s = Variant::String(self.map_string(s));
+					Ok(Some(self.add_const(s)))
+				}
 			},
 			Expression::Function {
 				expr,
@@ -492,7 +499,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				let ca = Box::new(CallArgs {
 					store_in: store,
-					func: (*name).into(),
+					func: self.map_string(name),
 					args: args.into_boxed_slice(),
 				});
 				self.instr.push(if let Some(expr) = expr {
@@ -570,6 +577,16 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				r
 			}
 			Entry::Occupied(e) => *e.get(),
+		}
+	}
+
+	fn map_string(&mut self, string: &str) -> Rc<str> {
+		if let Some(string) = self.string_map.get(string) {
+			string.clone()
+		} else {
+			let string: Rc<str> = string.into();
+			self.string_map.insert(string.clone());
+			string
 		}
 	}
 

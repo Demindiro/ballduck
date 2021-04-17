@@ -17,8 +17,8 @@ pub type ScriptObject = Rc<dyn ScriptType>;
 
 #[derive(Debug)]
 pub(crate) struct Script {
-	pub(crate) functions: FxHashMap<Box<str>, ByteCode>,
-	pub(crate) locals: FxHashMap<Box<str>, u16>,
+	pub(crate) functions: FxHashMap<Rc<str>, ByteCode>,
+	pub(crate) locals: FxHashMap<Rc<str>, u16>,
 }
 
 #[derive(Debug)]
@@ -116,7 +116,7 @@ impl dyn ScriptType + 'static {
 }
 
 impl Script {
-	pub(crate) fn new(locals: FxHashMap<Box<str>, u16>) -> Self {
+	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>) -> Self {
 		Self {
 			functions: FxHashMap::with_hasher(Default::default()),
 			locals,

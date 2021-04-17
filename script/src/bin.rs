@@ -3,6 +3,7 @@
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
 use ballscript::{Environment, ScriptType, Variant};
+use rustc_hash::FxHashSet;
 use std::env;
 use std::fs;
 use std::io;
@@ -11,11 +12,11 @@ pub fn main() -> Result<(), io::Error> {
 	let mut args = env::args();
 	let env = create_env();
 	let exec = args.next().unwrap_or_else(|| String::from("ballscript"));
+	let mut string_map = FxHashSet::with_hasher(Default::default());
 	if let Some(file) = args.next() {
 		match fs::read_to_string(file) {
-			Ok(source) => match ballscript::parse(&source) {
+			Ok(source) => match ballscript::parse(&source, &mut string_map) {
 				Ok(script) => {
-					//dbg!(&script);
 					let script = script.instance();
 					match script.call("main", &[], &env) {
 						Ok(_) => Ok(()),

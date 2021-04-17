@@ -5,10 +5,11 @@
 use crate::{CallError, CallResult, Variant};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
+use std::rc::Rc;
 
 #[derive(Default)]
 pub struct Environment {
-	functions: FxHashMap<Box<str>, EnvironmentFunction>,
+	functions: FxHashMap<Rc<str>, EnvironmentFunction>,
 }
 
 pub type EnvironmentFunction = Box<dyn Fn(&[Variant]) -> CallResult>;
@@ -30,7 +31,7 @@ impl Environment {
 		name: String,
 		f: EnvironmentFunction,
 	) -> Result<(), EnvironmentError> {
-		match self.functions.entry(name.into_boxed_str()) {
+		match self.functions.entry(name.into()) {
 			Entry::Vacant(e) => {
 				e.insert(f);
 				Ok(())

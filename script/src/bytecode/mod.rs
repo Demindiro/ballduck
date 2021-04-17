@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 struct CallArgs {
 	store_in: Option<u16>,
-	func: Box<str>,
+	func: Rc<str>,
 	args: Box<[u16]>,
 }
 
@@ -123,7 +123,7 @@ macro_rules! run_cmp {
 impl ByteCode {
 	pub(crate) fn run(
 		&self,
-		functions: &FxHashMap<Box<str>, Self>,
+		functions: &FxHashMap<Rc<str>, Self>,
 		locals: &mut [Variant],
 		args: &[Variant],
 		env: &Environment,

@@ -17,7 +17,8 @@ mod variant;
 
 pub use bytecode::CallResult;
 pub use environment::Environment;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::rc::Rc;
 use script::Script;
 pub use script::{CallError, Class, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
@@ -26,7 +27,7 @@ pub use variant::Variant;
 use bytecode::ByteCodeBuilder;
 use tokenizer::TokenStream;
 
-pub fn parse(source: &str) -> Result<Class, ()> {
+pub fn parse(source: &str, string_map: &mut FxHashSet<Rc<str>>) -> Result<Class, ()> {
 	let tks = TokenStream::parse(source).unwrap();
 	let ast = ast::Script::parse(tks).unwrap();
 
@@ -51,7 +52,7 @@ pub fn parse(source: &str) -> Result<Class, ()> {
 	}
 	for f in ast.functions {
 		let name = f.name.into();
-		match ByteCodeBuilder::parse(f, &methods, &script.locals) {
+		match ByteCodeBuilder::parse(f, &methods, &script.locals, string_map) {
 			Ok(f) => {
 				script.functions.insert(name, f);
 			}
