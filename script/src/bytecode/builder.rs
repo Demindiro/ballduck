@@ -6,7 +6,10 @@ use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::tokenizer::{AssignOp, Op};
 use crate::Variant;
+use core::convert::{TryFrom, TryInto};
+use core::hash;
 use rustc_hash::FxHashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's> {
@@ -19,6 +22,7 @@ pub(crate) struct ByteCodeBuilder<'e, 's> {
 	min_var_count: u16,
 	param_count: u16,
 	loops: Vec<LoopContext>,
+	const_map: FxHashMap<Constant, u16>,
 }
 
 struct LoopContext {
@@ -35,6 +39,16 @@ pub enum ByteCodeError {
 	UnexpectedContinue,
 }
 
+/// A type used to prevent duplication of constant values. It is capable of
+/// hashing and ordering `Real` types.
+#[derive(Clone, Debug, PartialOrd)]
+enum Constant {
+	Bool(bool),
+	Int(isize),
+	Real(f64),
+	Str(Rc<str>),
+}
+
 impl<'e, 's> ByteCodeBuilder<'e, 's> {
 	pub(crate) fn parse(
 		function: Function,
@@ -43,7 +57,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 	) -> Result<ByteCode, ByteCodeError> {
 		let mut builder = Self {
 			instr: Vec::new(),
-			vars: FxHashMap::with_hasher(Default::default()),
+			vars: HashMap::with_hasher(Default::default()),
 			consts: Vec::new(),
 			curr_var_count: function.parameters.len() as u16,
 			min_var_count: function.parameters.len() as u16,
@@ -51,6 +65,7 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 			methods,
 			param_count: function.parameters.len() as u16,
 			loops: Vec::new(),
+			const_map: HashMap::with_hasher(Default::default()),
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -220,7 +235,8 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 					} else {
 						expr_reg
 					};
-					self.instr.push(Instruction::JmpNotIf(expr_reg, start_ip as u32 + 1));
+					self.instr
+						.push(Instruction::JmpNotIf(expr_reg, start_ip as u32 + 1));
 
 					// Make `break`s jump to right after the expression evaluation
 					for i in context.breaks {
@@ -357,13 +373,19 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 				}
 				Statement::Continue { levels } => {
 					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
-					let c = self.loops.get_mut(i).ok_or(ByteCodeError::UnexpectedContinue)?;
+					let c = self
+						.loops
+						.get_mut(i)
+						.ok_or(ByteCodeError::UnexpectedContinue)?;
 					c.continues.push(self.instr.len() as u32);
 					self.instr.push(Instruction::Jmp(u32::MAX));
 				}
 				Statement::Break { levels } => {
 					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
-					let c = self.loops.get_mut(i).ok_or(ByteCodeError::UnexpectedBreak)?;
+					let c = self
+						.loops
+						.get_mut(i)
+						.ok_or(ByteCodeError::UnexpectedBreak)?;
 					c.breaks.push(self.instr.len() as u32);
 					self.instr.push(Instruction::Jmp(u32::MAX));
 				}
@@ -381,26 +403,27 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 		store: Option<u16>,
 		expr: &Expression,
 	) -> Result<Option<u16>, ByteCodeError> {
-		let mut add_const = |v| {
-			self.consts.push(v);
-			u16::MAX - self.consts.len() as u16 + 1
-		};
 		match expr {
 			Expression::Operation { left, op, right } => {
 				let store = store.expect("TODO: handle operations without store location");
 				let og_cvc = self.curr_var_count;
 				let (r_left, r_right) = (self.curr_var_count, self.curr_var_count + 1);
 				self.curr_var_count += 2;
-				self.min_var_count = self.min_var_count.max(self.curr_var_count);
 				let or_left = self.parse_expression(Some(r_left), left)?;
 				let left = if let Some(l) = or_left {
+					self.curr_var_count -= 1;
 					l
 				} else {
-					self.curr_var_count -= 1;
 					r_left
 				};
 				let or_right = self.parse_expression(Some(r_right), right)?;
-				let right = if let Some(r) = or_right { r } else { r_right };
+				let right = if let Some(r) = or_right {
+					self.curr_var_count -= 1;
+					r
+				} else {
+					r_right
+				};
+				self.update_min_vars();
 				self.instr.push(match op {
 					Op::Add => Instruction::Add(store, left, right),
 					Op::Sub => Instruction::Sub(store, left, right),
@@ -437,9 +460,9 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 						Err(ByteCodeError::UndefinedVariable)
 					}
 				}
-				Atom::Real(r) => Ok(Some(add_const(Variant::Real(r)))),
-				Atom::Integer(i) => Ok(Some(add_const(Variant::Integer(i)))),
-				Atom::String(s) => Ok(Some(add_const(Variant::String(s.to_string().into())))),
+				Atom::Real(r) => Ok(Some(self.add_const(Variant::Real(r)))),
+				Atom::Integer(i) => Ok(Some(self.add_const(Variant::Integer(i)))),
+				Atom::String(s) => Ok(Some(self.add_const(Variant::String(s.to_string().into())))),
 			},
 			Expression::Function {
 				expr,
@@ -536,11 +559,80 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 	}
 
 	fn add_const(&mut self, var: Variant) -> u16 {
-		self.consts.push(var);
-		u16::MAX - self.consts.len() as u16 + 1
+		let key = var
+			.try_into()
+			.expect("Failed to convert Variant to Constant");
+		match self.const_map.entry(key) {
+			Entry::Vacant(e) => {
+				self.consts.push(e.key().clone().into());
+				let r = u16::MAX - self.consts.len() as u16 + 1;
+				e.insert(r);
+				r
+			}
+			Entry::Occupied(e) => *e.get(),
+		}
 	}
 
 	fn update_min_vars(&mut self) {
 		self.min_var_count = self.min_var_count.max(self.curr_var_count);
+	}
+}
+
+impl hash::Hash for Constant {
+	fn hash<H>(&self, h: &mut H)
+	where
+		H: hash::Hasher,
+	{
+		match self {
+			Self::Bool(n) => h.write_u8(if *n { 1 } else { 0 }),
+			Self::Int(n) => h.write_isize(*n),
+			Self::Str(n) => h.write(n.as_bytes()),
+			Self::Real(n) => {
+				if n.is_nan() {
+					h.write_u64(u64::MAX);
+				} else {
+					h.write(&n.to_ne_bytes());
+				}
+			}
+		}
+	}
+}
+
+impl PartialEq for Constant {
+	fn eq(&self, rhs: &Self) -> bool {
+		match (self, rhs) {
+			(Self::Bool(a), Self::Bool(b)) => a == b,
+			(Self::Int(a), Self::Int(b)) => a == b,
+			(Self::Str(a), Self::Str(b)) => a == b,
+			(Self::Real(a), Self::Real(b)) => (a.is_nan() && b.is_nan()) || (a == b),
+			_ => false,
+		}
+	}
+}
+
+impl Eq for Constant {}
+
+impl TryFrom<Variant> for Constant {
+	type Error = ();
+
+	fn try_from(var: Variant) -> Result<Self, Self::Error> {
+		Ok(match var {
+			Variant::Bool(n) => Self::Bool(n),
+			Variant::Integer(n) => Self::Int(n),
+			Variant::String(n) => Self::Str(n),
+			Variant::Real(n) => Self::Real(n),
+			_ => return Err(()),
+		})
+	}
+}
+
+impl From<Constant> for Variant {
+	fn from(var: Constant) -> Self {
+		match var {
+			Constant::Bool(n) => Self::Bool(n),
+			Constant::Int(n) => Self::Integer(n),
+			Constant::Str(n) => Self::String(n),
+			Constant::Real(n) => Self::Real(n),
+		}
 	}
 }

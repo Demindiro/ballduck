@@ -58,7 +58,7 @@ pub(crate) enum Statement<'src> {
 		expr: Option<Expression<'src>>,
 	},
 	Continue {
-		levels: u8
+		levels: u8,
 	},
 	Break {
 		levels: u8,
@@ -264,10 +264,7 @@ impl<'src> Function<'src> {
 				Some(Token::While) => {
 					let expr = Expression::parse(tokens)?;
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
-					lines.push(Statement::While {
-						expr,
-						lines: blk,
-					});
+					lines.push(Statement::While { expr, lines: blk });
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
@@ -356,14 +353,14 @@ impl<'src> Function<'src> {
 				}
 				Some(tk) if tk == Token::Continue || tk == Token::Break => {
 					let levels = match tokens.next() {
-						Some(Token::Number(num)) => {
-							match parse_number(num) {
-								Ok(Atom::Integer(num)) => num.try_into().expect("TODO handle num > u8::MAX"),
-								Ok(Atom::Real(_)) => err!(UnexpectedToken, Token::Number(num), tokens),
-								Err(_) => err!(NotANumber, tokens),
-								_ => unreachable!(),
+						Some(Token::Number(num)) => match parse_number(num) {
+							Ok(Atom::Integer(num)) => {
+								num.try_into().expect("TODO handle num > u8::MAX")
 							}
-						}
+							Ok(Atom::Real(_)) => err!(UnexpectedToken, Token::Number(num), tokens),
+							Err(_) => err!(NotANumber, tokens),
+							_ => unreachable!(),
+						},
 						Some(Token::Indent(_)) => {
 							tokens.prev();
 							0
@@ -520,9 +517,7 @@ impl<'src> Expression<'src> {
 							tokens.prev();
 							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
 						}
-						None => {
-							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
-						}
+						None => Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?)),
 						e => todo!("{:?}", e),
 					},
 					e => todo!("{:?}", e),
