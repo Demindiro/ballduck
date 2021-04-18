@@ -2,12 +2,60 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::bytecode::CallResult;
-use crate::{CallError, Environment, ScriptObject};
+use crate::{CallError, CallResult, Environment, ScriptObject};
 use core::cmp;
 use core::fmt;
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 use std::rc::Rc;
+
+/// This trait must be implemented on custom Variant types.
+/// A custom variant is useful if you have a type that is common and needs to
+/// be able to be processed relatively quickly.
+pub trait VariantType
+where
+	Self:
+		Clone + fmt::Debug + fmt::Display + Default + From<bool> + PartialEq + PartialOrd + 'static,
+{
+	fn new_bool(value: bool) -> Self;
+
+	fn new_integer(value: isize) -> Self;
+
+	fn new_real(value: f64) -> Self;
+
+	fn new_string(value: Rc<str>) -> Self;
+
+	fn new_object(value: ScriptObject<Self>) -> Self;
+
+	fn as_bool(&self) -> Result<bool, &Self>;
+
+	fn as_integer(&self) -> Result<isize, &Self>;
+
+	fn as_real(&self) -> Result<f64, &Self>;
+
+	fn as_string(self) -> Result<Rc<str>, Self>;
+
+	fn as_object(self) -> Result<ScriptObject<Self>, Self>;
+
+	fn call(&self, function: &str, args: &[Self], env: &Environment<Self>) -> CallResult<Self>;
+
+	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>>;
+
+	fn index(&self, index: &Self) -> CallResult<Self>;
+
+	fn set_index(&self, index: &Self, value: Self) -> CallResult<()>;
+
+	// TODO this is stupid as hell but I'm out of ideas
+	fn add(&self, rhs: &Self) -> CallResult<Self>;
+	fn sub(&self, rhs: &Self) -> CallResult<Self>;
+	fn mul(&self, rhs: &Self) -> CallResult<Self>;
+	fn div(&self, rhs: &Self) -> CallResult<Self>;
+	fn rem(&self, rhs: &Self) -> CallResult<Self>;
+	fn bitand(&self, rhs: &Self) -> CallResult<Self>;
+	fn bitor(&self, rhs: &Self) -> CallResult<Self>;
+	fn bitxor(&self, rhs: &Self) -> CallResult<Self>;
+	fn lhs(&self, rhs: &Self) -> CallResult<Self>;
+	fn rhs(&self, rhs: &Self) -> CallResult<Self>;
+}
 
 #[derive(Clone)]
 /// Variant type that encodes a few common types. Having the common types
@@ -19,7 +67,7 @@ pub enum Variant {
 	Integer(isize),
 	Char(char),
 	String(Rc<str>),
-	Object(ScriptObject),
+	Object(ScriptObject<Self>),
 }
 
 impl Default for Variant {
@@ -38,15 +86,15 @@ macro_rules! check_arg_count {
 
 macro_rules! gen_op {
 	(
-		$trait:ident, $fn:ident
+		$variant:ident, $trait:ident, $fn:ident
 		[$left:ident, $right:ident]
 		$([$lhs:ident, $rhs:ident] => $out:ident $code:block)*
 	) => {
-		impl $trait<Self> for &Variant {
-			type Output = CallResult;
+		impl<'a> $trait<&'a $variant> for &'a $variant {
+			type Output = CallResult<$variant>;
 
 			#[inline]
-			fn $fn(self, rhs: Self) -> Self::Output {
+			fn $fn(self, rhs: &'a $variant) -> Self::Output {
 				Ok(match (self, rhs) {
 					$((Variant::$lhs($left), Variant::$rhs($right)) => Variant::$out($code),)*
 					_ => return Err(CallError::IncompatibleType),
@@ -57,7 +105,7 @@ macro_rules! gen_op {
 }
 
 gen_op!(
-	Add, add
+	Variant, Add, add
 	[rhs, lhs]
 	[Real, Real] => Real { rhs + lhs }
 	[Real, Integer] => Real { rhs + *lhs as f64 }
@@ -71,7 +119,7 @@ gen_op!(
 );
 
 gen_op!(
-	Sub, sub
+	Variant, Sub, sub
 	[rhs, lhs]
 	[Real, Real] => Real { rhs - lhs }
 	[Real, Integer] => Real { rhs - *lhs as f64 }
@@ -79,7 +127,7 @@ gen_op!(
 );
 
 gen_op!(
-	Mul, mul
+	Variant, Mul, mul
 	[rhs, lhs]
 	[Real, Real] => Real { rhs * lhs }
 	[Real, Integer] => Real { rhs * *lhs as f64 }
@@ -88,7 +136,7 @@ gen_op!(
 );
 
 gen_op!(
-	Div, div
+	Variant, Div, div
 	[rhs, lhs]
 	[Real, Real] => Real { rhs / lhs }
 	[Real, Integer] => Real { rhs / *lhs as f64 }
@@ -97,7 +145,7 @@ gen_op!(
 );
 
 gen_op!(
-	Rem, rem
+	Variant, Rem, rem
 	[rhs, lhs]
 	[Real, Real] => Real { rhs % lhs }
 	[Real, Integer] => Real { rhs % *lhs as f64 }
@@ -106,34 +154,34 @@ gen_op!(
 );
 
 gen_op!(
-	BitAnd, bitand
+	Variant, BitAnd, bitand
 	[rhs, lhs]
 	[Bool, Bool] => Bool { rhs & lhs }
 	[Integer, Integer] => Integer { rhs & lhs }
 );
 
 gen_op!(
-	BitOr, bitor
+	Variant, BitOr, bitor
 	[rhs, lhs]
 	[Bool, Bool] => Bool { rhs | lhs }
 	[Integer, Integer] => Integer { rhs | lhs }
 );
 
 gen_op!(
-	BitXor, bitxor
+	Variant, BitXor, bitxor
 	[rhs, lhs]
 	[Bool, Bool] => Bool { rhs ^ lhs }
 	[Integer, Integer] => Integer { rhs ^ lhs }
 );
 
 gen_op!(
-	Shl, shl
+	Variant, Shl, shl
 	[rhs, lhs]
 	[Integer, Integer] => Integer { rhs << lhs }
 );
 
 gen_op!(
-	Shr, shr
+	Variant, Shr, shr
 	[rhs, lhs]
 	[Integer, Integer] => Integer { rhs >> lhs }
 );
@@ -185,44 +233,102 @@ macro_rules! call_tbl {
 			)*
 		)*
 	} => {
-		impl Variant {
-			#[allow(unused_variables)]
-			pub fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult {
-				match self {
-					Variant::None => Err(CallError::IsEmpty),
-					$(
-						Variant::$variant($var) => match function {
-							$(
-								stringify!($func) => {
-									check_arg_count!(args, $arg_count);
-									Ok($code)
-								}
-							)*
-							_ => Err(CallError::UndefinedFunction),
-						}
-					)*
-				}
+		#[allow(unused_variables)]
+		fn call(&self, function: &str, args: &[Variant], env: &Environment<Self>) -> CallResult<Self> {
+			match self {
+				Variant::None => Err(CallError::IsEmpty),
+				$(
+					Variant::$variant($var) => match function {
+						$(
+							stringify!($func) => {
+								check_arg_count!(args, $arg_count);
+								Ok($code)
+							}
+						)*
+						_ => Err(CallError::UndefinedFunction),
+					}
+				)*
 			}
 		}
 	};
 }
 
-call_tbl! {
-	var
-	[Bool]
-	[Real]
-	abs [0] => { Variant::Real(var.abs()) }
-	sqrt [0] => { Variant::Real(var.sqrt()) }
-	[Integer]
-	abs [0] => { Variant::Integer(var.abs()) }
-	[Char]
-	[String]
-	len [0] => { Variant::Integer(var.len() as isize) }
-	[Object]
-}
+impl VariantType for Variant {
+	fn new_bool(value: bool) -> Self {
+		Self::Bool(value)
+	}
 
-impl Variant {
-	pub fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Variant>>> {
+	fn new_integer(value: isize) -> Self {
+		Self::Integer(value)
+	}
+
+	fn new_real(value: f64) -> Self {
+		Self::Real(value)
+	}
+
+	fn new_string(value: Rc<str>) -> Self {
+		Self::String(value)
+	}
+
+	fn new_object(value: ScriptObject<Self>) -> Self {
+		Self::Object(value)
+	}
+
+	fn as_bool(&self) -> Result<bool, &Self> {
+		if let Self::Bool(b) = self {
+			Ok(*b)
+		} else {
+			Err(self)
+		}
+	}
+
+	fn as_integer(&self) -> Result<isize, &Self> {
+		if let Self::Integer(b) = self {
+			Ok(*b)
+		} else {
+			Err(self)
+		}
+	}
+
+	fn as_real(&self) -> Result<f64, &Self> {
+		if let Self::Real(b) = self {
+			Ok(*b)
+		} else {
+			Err(self)
+		}
+	}
+
+	fn as_string(self) -> Result<Rc<str>, Self> {
+		if let Self::String(b) = self {
+			Ok(b)
+		} else {
+			Err(self)
+		}
+	}
+
+	fn as_object(self) -> Result<ScriptObject<Self>, Self> {
+		if let Self::Object(b) = self {
+			Ok(b)
+		} else {
+			Err(self)
+		}
+	}
+
+	call_tbl! {
+		var
+		[Bool]
+		[Real]
+		abs [0] => { Variant::Real(var.abs()) }
+		sqrt [0] => { Variant::Real(var.sqrt()) }
+		[Integer]
+		abs [0] => { Variant::Integer(var.abs()) }
+		[Char]
+		[String]
+		len [0] => { Variant::Integer(var.len() as isize) }
+		[Object]
+	}
+
+	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
 			&Variant::Integer(i) => {
@@ -238,18 +344,49 @@ impl Variant {
 		}
 	}
 
-	pub fn index(&self, index: &Variant) -> CallResult {
+	fn index(&self, index: &Self) -> CallResult<Self> {
 		match self {
 			Self::Object(obj) => obj.index(index),
 			_ => Err(CallError::IncompatibleType),
 		}
 	}
 
-	pub fn set_index(&self, index: &Variant, value: Variant) -> CallResult<()> {
+	fn set_index(&self, index: &Self, value: Self) -> CallResult<()> {
 		match self {
 			Self::Object(obj) => obj.set_index(index, value),
 			_ => Err(CallError::IncompatibleType),
 		}
+	}
+
+	fn add(&self, rhs: &Self) -> CallResult<Self> {
+		self + rhs
+	}
+	fn sub(&self, rhs: &Self) -> CallResult<Self> {
+		self - rhs
+	}
+	fn mul(&self, rhs: &Self) -> CallResult<Self> {
+		self * rhs
+	}
+	fn div(&self, rhs: &Self) -> CallResult<Self> {
+		self / rhs
+	}
+	fn rem(&self, rhs: &Self) -> CallResult<Self> {
+		self % rhs
+	}
+	fn bitand(&self, rhs: &Self) -> CallResult<Self> {
+		self & rhs
+	}
+	fn bitor(&self, rhs: &Self) -> CallResult<Self> {
+		self | rhs
+	}
+	fn bitxor(&self, rhs: &Self) -> CallResult<Self> {
+		self ^ rhs
+	}
+	fn lhs(&self, rhs: &Self) -> CallResult<Self> {
+		self << rhs
+	}
+	fn rhs(&self, rhs: &Self) -> CallResult<Self> {
+		self >> rhs
 	}
 }
 
@@ -282,6 +419,12 @@ impl fmt::Display for Variant {
 			//Variant::Object(n) => write!(f, "{}", n),
 			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
+	}
+}
+
+impl From<bool> for Variant {
+	fn from(var: bool) -> Self {
+		Variant::Bool(var)
 	}
 }
 

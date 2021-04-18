@@ -5,20 +5,22 @@
 use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
 use crate::tokenizer::{AssignOp, Op};
-use crate::Variant;
-use core::convert::{TryFrom, TryInto};
+use crate::VariantType;
 use core::hash;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::{Entry, HashMap};
 use std::rc::Rc;
 use unwrap_none::UnwrapNone;
 
-pub(crate) struct ByteCodeBuilder<'e, 's> {
+pub(crate) struct ByteCodeBuilder<'e, 's, V>
+where
+	V: VariantType,
+{
 	methods: &'e FxHashMap<&'e str, ()>,
 	locals: &'e FxHashMap<Rc<str>, u16>,
 	instr: Vec<Instruction>,
 	vars: FxHashMap<&'s str, u16>,
-	consts: Vec<Variant>,
+	consts: Vec<V>,
 	curr_var_count: u16,
 	min_var_count: u16,
 	param_count: u16,
@@ -51,13 +53,16 @@ enum Constant {
 	Str(Rc<str>),
 }
 
-impl<'e, 's> ByteCodeBuilder<'e, 's> {
+impl<'e, 's, V> ByteCodeBuilder<'e, 's, V>
+where
+	V: VariantType,
+{
 	pub(crate) fn parse(
 		function: Function,
 		methods: &'e FxHashMap<&'e str, ()>,
 		locals: &'e FxHashMap<Rc<str>, u16>,
 		string_map: &'e mut FxHashSet<Rc<str>>,
-	) -> Result<ByteCode, ByteCodeError> {
+	) -> Result<ByteCode<V>, ByteCodeError> {
 		let mut builder = Self {
 			instr: Vec::new(),
 			vars: HashMap::with_hasher(Default::default()),
@@ -566,12 +571,10 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 	}
 
 	fn add_const(&mut self, var: Variant) -> u16 {
-		let key = var
-			.try_into()
-			.expect("Failed to convert Variant to Constant");
+		let key = Constant::from_variant(var).expect("Failed to convert Variant to Constant");
 		match self.const_map.entry(key) {
 			Entry::Vacant(e) => {
-				self.consts.push(e.key().clone().into());
+				self.consts.push(e.key().clone().as_variant());
 				let r = u16::MAX - self.consts.len() as u16 + 1;
 				e.insert(r);
 				r
@@ -592,6 +595,39 @@ impl<'e, 's> ByteCodeBuilder<'e, 's> {
 
 	fn update_min_vars(&mut self) {
 		self.min_var_count = self.min_var_count.max(self.curr_var_count);
+	}
+}
+
+impl Constant {
+	fn from_variant<V>(var: V) -> Result<Self, ()>
+	where
+		V: VariantType,
+	{
+		Ok(match var.as_bool() {
+			Ok(v) => Self::Bool(v),
+			Err(v) => match v.as_integer() {
+				Ok(v) => Self::Int(v),
+				Err(v) => match v.as_real() {
+					Ok(v) => Self::Real(v),
+					Err(_) => match var.as_string() {
+						Ok(v) => Self::Str(v),
+						Err(_) => return Err(()),
+					},
+				},
+			},
+		})
+	}
+
+	fn as_variant<V>(self) -> V
+	where
+		V: VariantType,
+	{
+		match self {
+			Self::Bool(b) => V::new_bool(b),
+			Self::Int(i) => V::new_integer(i),
+			Self::Real(r) => V::new_real(r),
+			Self::Str(s) => V::new_string(s),
+		}
 	}
 }
 
@@ -628,28 +664,3 @@ impl PartialEq for Constant {
 }
 
 impl Eq for Constant {}
-
-impl TryFrom<Variant> for Constant {
-	type Error = ();
-
-	fn try_from(var: Variant) -> Result<Self, Self::Error> {
-		Ok(match var {
-			Variant::Bool(n) => Self::Bool(n),
-			Variant::Integer(n) => Self::Int(n),
-			Variant::String(n) => Self::Str(n),
-			Variant::Real(n) => Self::Real(n),
-			_ => return Err(()),
-		})
-	}
-}
-
-impl From<Constant> for Variant {
-	fn from(var: Constant) -> Self {
-		match var {
-			Constant::Bool(n) => Self::Bool(n),
-			Constant::Int(n) => Self::Integer(n),
-			Constant::Str(n) => Self::String(n),
-			Constant::Real(n) => Self::Real(n),
-		}
-	}
-}

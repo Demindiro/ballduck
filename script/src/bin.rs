@@ -17,6 +17,7 @@ pub fn main() -> Result<(), io::Error> {
 		match fs::read_to_string(file) {
 			Ok(source) => match ballscript::parse(&source, &mut string_map) {
 				Ok(script) => {
+					dbg!(&script);
 					let script = script.instance();
 					match script.call("main", &[], &env) {
 						Ok(_) => Ok(()),
@@ -36,7 +37,7 @@ pub fn main() -> Result<(), io::Error> {
 	}
 }
 
-fn create_env() -> Environment {
+fn create_env() -> Environment<Variant> {
 	let mut env = Environment::new();
 	env.add_function(
 		"print".into(),

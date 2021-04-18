@@ -7,7 +7,7 @@ mod builder;
 pub(crate) use builder::ByteCodeBuilder;
 
 use crate::script::CallError;
-use crate::{Array, Dictionary, Environment, Variant};
+use crate::{Array, Dictionary, Environment, Variant, VariantType};
 use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
@@ -59,11 +59,14 @@ enum Instruction {
 	SetIndex(u16, u16, u16),
 }
 
-pub(crate) struct ByteCode {
+pub(crate) struct ByteCode<V>
+where
+	V: VariantType,
+{
 	code: Vec<Instruction>,
 	param_count: u16,
 	var_count: u16,
-	consts: Vec<Variant>,
+	consts: Vec<V>,
 }
 
 #[derive(Debug)]
@@ -79,7 +82,7 @@ pub enum RunError {
 	LocalOutOfBounds,
 }
 
-pub type CallResult<T = Variant> = Result<T, CallError>;
+pub type CallResult<T> = Result<T, CallError>;
 
 #[cfg(not(feature = "unsafe-loop"))]
 macro_rules! reg {
@@ -109,25 +112,46 @@ macro_rules! reg {
 
 macro_rules! run_op {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		reg!(mut $vars $r) = (reg!(ref $vars $a) $op reg!(ref $vars $b)).map_err(err::call)?;
+		reg!(mut $vars $r) = (reg!(ref $vars $a).$op(reg!(ref $vars $b))).map_err(err::call)?;
 	};
 }
 
 macro_rules! run_cmp {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		reg!(mut $vars $r) = Variant::Bool(reg!(ref $vars $a) $op reg!(ref $vars $b));
+		reg!(mut $vars $r) = (reg!(ref $vars $a) $op reg!(ref $vars $b)).into();
 	};
 }
 
+/*
+pub trait Math<V>
+where
+	for<'a> &'a V: Add<&'a V, Output = CallResult<V>>
+		+ Sub<&'a V, Output = CallResult<V>>
+		+ Mul<&'a V, Output = CallResult<V>>
+		+ Div<&'a V, Output = CallResult<V>>
+		+ Rem<&'a V, Output = CallResult<V>>
+		+ Rem<&'a V, Output = CallResult<V>>
+		+ BitAnd<&'a V, Output = CallResult<V>>
+		+ BitOr<&'a V, Output = CallResult<V>>
+		+ BitXor<&'a V, Output = CallResult<V>>
+		+ Shr<&'a V, Output = CallResult<V>>
+		+ Shl<&'a V, Output = CallResult<V>>,
+{
+}
+*/
+
 /// The interpreter
-impl ByteCode {
+impl<V> ByteCode<V>
+where
+	V: VariantType,
+{
 	pub(crate) fn run(
 		&self,
 		functions: &FxHashMap<Rc<str>, Self>,
-		locals: &mut [Variant],
-		args: &[Variant],
-		env: &Environment,
-	) -> Result<Variant, RunError> {
+		locals: &mut [V],
+		args: &[V],
+		env: &Environment<V>,
+	) -> Result<V, RunError> {
 		if args.len() != self.param_count as usize {
 			return Err(RunError::IncorrectArgumentCount);
 		}
@@ -135,7 +159,7 @@ impl ByteCode {
 		for a in args.iter() {
 			vars.push(a.clone());
 		}
-		vars.resize(self.var_count as usize, Variant::default());
+		vars.resize(self.var_count as usize, V::default());
 		vars.extend(self.consts.iter().cloned());
 		let mut ip = 0;
 		let mut iterators = Vec::new();
@@ -193,7 +217,7 @@ impl ByteCode {
 						}
 					}
 					RetSome(reg) => break Ok(mem::take(reg!(ref mut vars reg))),
-					RetNone => break Ok(Variant::None),
+					RetNone => break Ok(V::default()),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = reg!(ref vars iter);
 						let mut iter = iter.iter().map_err(err::call)?;
@@ -220,7 +244,8 @@ impl ByteCode {
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
-						if let Variant::Bool(b) = reg!(ref vars reg) {
+						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
+							reg!(mut vars reg) = V::new_bool(b);
 							if !b {
 								ip = *jmp_ip;
 							}
@@ -229,8 +254,9 @@ impl ByteCode {
 						}
 					}
 					JmpNotIf(reg, jmp_ip) => {
-						if let Variant::Bool(b) = reg!(ref vars reg) {
-							if *b {
+						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
+							reg!(mut vars reg) = V::new_bool(b);
+							if b {
 								ip = *jmp_ip;
 							}
 						} else {
@@ -238,16 +264,16 @@ impl ByteCode {
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
-					Add(r, a, b) => run_op!(vars, r = a + b),
-					Sub(r, a, b) => run_op!(vars, r = a - b),
-					Mul(r, a, b) => run_op!(vars, r = a * b),
-					Div(r, a, b) => run_op!(vars, r = a / b),
-					Rem(r, a, b) => run_op!(vars, r = a % b),
-					And(r, a, b) => run_op!(vars, r = a & b),
-					Or(r, a, b) => run_op!(vars, r = a | b),
-					Xor(r, a, b) => run_op!(vars, r = a ^ b),
-					Shl(r, a, b) => run_op!(vars, r = a << b),
-					Shr(r, a, b) => run_op!(vars, r = a >> b),
+					Add(r, a, b) => run_op!(vars, r = a add b),
+					Sub(r, a, b) => run_op!(vars, r = a sub b),
+					Mul(r, a, b) => run_op!(vars, r = a mul b),
+					Div(r, a, b) => run_op!(vars, r = a div b),
+					Rem(r, a, b) => run_op!(vars, r = a rem b),
+					And(r, a, b) => run_op!(vars, r = a bitand b),
+					Or(r, a, b) => run_op!(vars, r = a bitor b),
+					Xor(r, a, b) => run_op!(vars, r = a bitxor b),
+					Shl(r, a, b) => run_op!(vars, r = a lhs b),
+					Shr(r, a, b) => run_op!(vars, r = a rhs b),
 					LessEq(r, a, b) => run_cmp!(vars, r = a <= b),
 					Less(r, a, b) => run_cmp!(vars, r = a < b),
 					Neq(r, a, b) => run_cmp!(vars, r = a != b),
@@ -265,11 +291,11 @@ impl ByteCode {
 					}
 					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
 					NewArray(r, c) => {
-						reg!(mut vars r) = Variant::Object(Rc::new(Array::with_len(*c)))
+						reg!(mut vars r) = V::new_object(Rc::new(Array::with_len(*c)))
 					}
 					NewDictionary(r, c) => {
 						let d = Rc::new(Dictionary::with_capacity(*c));
-						reg!(mut vars r) = Variant::Object(d);
+						reg!(mut vars r) = V::new_object(d);
 					}
 					GetIndex(r, o, i) => {
 						reg!(mut vars r) = reg!(ref vars o)
@@ -342,7 +368,10 @@ impl Debug for CallArgs {
 	}
 }
 
-impl fmt::Debug for ByteCode {
+impl<V> fmt::Debug for ByteCode<V>
+where
+	V: VariantType,
+{
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let br = |f: &mut fmt::Formatter| f.write_str(if f.alternate() { "\n" } else { ", " });
 		if f.alternate() {

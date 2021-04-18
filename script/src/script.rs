@@ -3,7 +3,7 @@
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
 use crate::bytecode::{ByteCode, CallResult, RunError};
-use crate::{Environment, Variant};
+use crate::{Environment, VariantType};
 use core::any::{Any, TypeId};
 use core::fmt;
 use rustc_hash::FxHashMap;
@@ -11,19 +11,27 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub struct Class(Arc<Script>);
+pub struct Class<V>(Arc<Script<V>>)
+where
+	V: VariantType;
 
-pub type ScriptObject = Rc<dyn ScriptType>;
+pub type ScriptObject<V> = Rc<dyn ScriptType<V>>;
 
 #[derive(Debug)]
-pub(crate) struct Script {
-	pub(crate) functions: FxHashMap<Rc<str>, ByteCode>,
+pub(crate) struct Script<V>
+where
+	V: VariantType,
+{
+	pub(crate) functions: FxHashMap<Rc<str>, ByteCode<V>>,
 	pub(crate) locals: FxHashMap<Rc<str>, u16>,
 }
 
 #[derive(Debug)]
-pub struct Instance {
-	script: Arc<Script>,
+pub struct Instance<V>
+where
+	V: VariantType,
+{
+	script: Arc<Script<V>>,
 	// TODO we have 3 options to solve the `A.foo() -> B.bar() -> A.foo()` problem:
 	// * We use `Cell<Box<[_]>>`. This *should* have relatively little overhead but is
 	//   very unintuitive, and the second `A.foo()` call will only see old variable names.
@@ -37,7 +45,7 @@ pub struct Instance {
 	// fast enough (or perhaps even faster) we should use that.
 	// For now, the second option is chosen as the third can't be undone without being a
 	// massive breaking change.
-	variables: RefCell<Box<[Variant]>>,
+	variables: RefCell<Box<[V]>>,
 }
 
 #[derive(Debug)]
@@ -53,20 +61,11 @@ pub enum CallError {
 	AlreadyBorrowed,
 }
 
-pub trait ScriptType: fmt::Debug + 'static {
-	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult;
-
-	#[inline]
-	fn mul(&self, rhs: &ScriptObject) -> CallResult {
-		let _ = rhs;
-		Err(CallError::InvalidOperator)
-	}
-
-	#[inline]
-	fn add(&self, rhs: &ScriptObject) -> CallResult {
-		let _ = rhs;
-		Err(CallError::InvalidOperator)
-	}
+pub trait ScriptType<V>: 'static
+where
+	V: VariantType,
+{
+	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V>;
 
 	#[inline]
 	fn type_id(&self) -> TypeId {
@@ -74,13 +73,13 @@ pub trait ScriptType: fmt::Debug + 'static {
 	}
 
 	#[inline]
-	fn index(&self, index: &Variant) -> CallResult {
+	fn index(&self, index: &V) -> CallResult<V> {
 		let _ = index;
 		Err(CallError::IncompatibleType)
 	}
 
 	#[inline]
-	fn set_index(&self, index: &Variant, value: Variant) -> CallResult<()> {
+	fn set_index(&self, index: &V, value: V) -> CallResult<()> {
 		let _ = (index, value);
 		Err(CallError::IncompatibleType)
 	}
@@ -91,14 +90,17 @@ pub trait ScriptType: fmt::Debug + 'static {
 	}
 
 	#[inline]
-	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Variant>>> {
+	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = V>>> {
 		Err(CallError::IncompatibleType)
 	}
 }
 
 /// Copied from [`Any`](std::any::Any). As casting between trait objects is not possible
 /// without indirection, this is used instead.
-impl dyn ScriptType + 'static {
+impl<V> dyn ScriptType<V> + 'static
+where
+	V: VariantType,
+{
 	#[inline]
 	pub fn is<T: 'static>(&self) -> bool {
 		TypeId::of::<T>() == self.type_id()
@@ -115,7 +117,10 @@ impl dyn ScriptType + 'static {
 	}
 }
 
-impl Script {
+impl<V> Script<V>
+where
+	V: VariantType,
+{
 	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>) -> Self {
 		Self {
 			functions: FxHashMap::with_hasher(Default::default()),
@@ -126,10 +131,10 @@ impl Script {
 	fn call(
 		&self,
 		function: &str,
-		locals: &mut [Variant],
-		args: &[Variant],
-		env: &Environment,
-	) -> CallResult {
+		locals: &mut [V],
+		args: &[V],
+		env: &Environment<V>,
+	) -> CallResult<V> {
 		if let Some(function) = self.functions.get(function) {
 			function
 				.run(&self.functions, locals, args, &env)
@@ -140,10 +145,13 @@ impl Script {
 	}
 }
 
-impl Class {
-	pub fn instance(&self) -> Instance {
+impl<V> Class<V>
+where
+	V: VariantType,
+{
+	pub fn instance(&self) -> Instance<V> {
 		let mut locals = Vec::new();
-		locals.resize(self.0.locals.len(), Variant::default());
+		locals.resize(self.0.locals.len(), V::default());
 		Instance {
 			script: self.0.clone(),
 			variables: RefCell::new(locals.into_boxed_slice()),
@@ -151,14 +159,20 @@ impl Class {
 	}
 }
 
-impl From<Script> for Class {
-	fn from(script: Script) -> Self {
+impl<V> From<Script<V>> for Class<V>
+where
+	V: VariantType,
+{
+	fn from(script: Script<V>) -> Self {
 		Self(Arc::new(script))
 	}
 }
 
-impl ScriptType for Instance {
-	fn call(&self, function: &str, args: &[Variant], env: &Environment) -> CallResult {
+impl<V> ScriptType<V> for Instance<V>
+where
+	V: VariantType,
+{
+	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
 			self.script.call(function, &mut vars, args, env)
 		} else {
@@ -167,7 +181,10 @@ impl ScriptType for Instance {
 	}
 }
 
-impl fmt::Debug for Class {
+impl<V> fmt::Debug for Class<V>
+where
+	V: VariantType,
+{
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if f.alternate() {
 			write!(f, "{:#?}", self.0.functions)

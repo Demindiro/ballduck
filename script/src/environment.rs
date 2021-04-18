@@ -2,24 +2,30 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::{CallError, CallResult, Variant};
+use crate::{CallError, CallResult, VariantType};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 #[derive(Default)]
-pub struct Environment {
-	functions: FxHashMap<Rc<str>, EnvironmentFunction>,
+pub struct Environment<V>
+where
+	V: VariantType,
+{
+	functions: FxHashMap<Rc<str>, EnvironmentFunction<V>>,
 }
 
-pub type EnvironmentFunction = Box<dyn Fn(&[Variant]) -> CallResult>;
+pub type EnvironmentFunction<V> = Box<dyn Fn(&[V]) -> CallResult<V>>;
 
 #[derive(Debug)]
 pub enum EnvironmentError {
 	FunctionAlreadyExists,
 }
 
-impl Environment {
+impl<V> Environment<V>
+where
+	V: VariantType,
+{
 	pub fn new() -> Self {
 		Self {
 			functions: FxHashMap::with_hasher(Default::default()),
@@ -29,7 +35,7 @@ impl Environment {
 	pub fn add_function(
 		&mut self,
 		name: String,
-		f: EnvironmentFunction,
+		f: EnvironmentFunction<V>,
 	) -> Result<(), EnvironmentError> {
 		match self.functions.entry(name.into()) {
 			Entry::Vacant(e) => {
@@ -40,7 +46,7 @@ impl Environment {
 		}
 	}
 
-	pub fn call(&self, func: &str, args: &[Variant]) -> CallResult {
+	pub fn call(&self, func: &str, args: &[V]) -> CallResult<V> {
 		self.functions
 			.get(func)
 			.ok_or(CallError::UndefinedFunction)?(args)
