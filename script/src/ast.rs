@@ -734,19 +734,12 @@ impl<'src> Expression<'src> {
 					let expr = Expression::parse(tokens)?;
 					args.push(expr);
 				}
-				e => todo!("{:?}", e),
+				_ => todo(tokens, line!())?,
 			};
 			match tokens.next() {
 				Some(Token::Comma) => (),
 				Some(tk) if tk == end_token => break,
-				Some(tk) => {
-					dbg!(tk);
-					todo!()
-				} //err!(UnexpectedToken, tk, tokens),
-				tk => {
-					dbg!(tk, args);
-					todo!()
-				}
+				_ => todo(tokens, line!())?,
 			}
 		}
 		Ok(args)
@@ -767,7 +760,7 @@ impl<'src> Expression<'src> {
 					let expr = Expression::parse(tokens)?;
 					expr
 				}
-				e => todo!("{:?}", e),
+				_ => todo(tokens, line!())?,
 			};
 			match tokens.next() {
 				Some(Token::Colon) => (),
@@ -786,14 +779,7 @@ impl<'src> Expression<'src> {
 			match tokens.next() {
 				Some(Token::Comma) => (),
 				Some(tk) if tk == end_token => break,
-				Some(tk) => {
-					dbg!(tk);
-					todo!()
-				} //err!(UnexpectedToken, tk, tokens),
-				tk => {
-					dbg!(tk, args);
-					todo!()
-				}
+				_ => todo(tokens, line!())?,
 			}
 		}
 		Ok(args)
