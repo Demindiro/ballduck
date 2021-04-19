@@ -7,7 +7,7 @@ mod builder;
 pub(crate) use builder::ByteCodeBuilder;
 
 use crate::script::CallError;
-use crate::{Array, Dictionary, Environment, Variant, VariantType};
+use crate::{Array, Dictionary, Environment, VariantType};
 use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
@@ -166,6 +166,8 @@ where
 		let mut call_args = Vec::new();
 		loop {
 			if let Some(instr) = self.code.get(ip as usize) {
+				#[cfg(feature = "print-instructions")]
+				println!("{:<4}: {:?}", ip, instr);
 				ip += 1;
 				use Instruction::*;
 				match instr {

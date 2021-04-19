@@ -223,36 +223,6 @@ impl PartialOrd<Self> for Variant {
 	}
 }
 
-macro_rules! call_tbl {
-	{
-		$var:ident
-		$(
-			[$variant:ident]
-			$(
-				$func:ident [$arg_count:expr] => $code:block
-			)*
-		)*
-	} => {
-		#[allow(unused_variables)]
-		fn call(&self, function: &str, args: &[Variant], env: &Environment<Self>) -> CallResult<Self> {
-			match self {
-				Variant::None => Err(CallError::IsEmpty),
-				$(
-					Variant::$variant($var) => match function {
-						$(
-							stringify!($func) => {
-								check_arg_count!(args, $arg_count);
-								Ok($code)
-							}
-						)*
-						_ => Err(CallError::UndefinedFunction),
-					}
-				)*
-			}
-		}
-	};
-}
-
 impl VariantType for Variant {
 	fn new_bool(value: bool) -> Self {
 		Self::Bool(value)
@@ -314,18 +284,37 @@ impl VariantType for Variant {
 		}
 	}
 
-	call_tbl! {
-		var
-		[Bool]
-		[Real]
-		abs [0] => { Variant::Real(var.abs()) }
-		sqrt [0] => { Variant::Real(var.sqrt()) }
-		[Integer]
-		abs [0] => { Variant::Integer(var.abs()) }
-		[Char]
-		[String]
-		len [0] => { Variant::Integer(var.len() as isize) }
-		[Object]
+	fn call(&self, function: &str, args: &[Self], env: &Environment<Self>) -> CallResult<Self> {
+		Ok(match self {
+			Self::None => return Err(CallError::IsEmpty),
+			Self::Real(r) => match function {
+				"abs" => {
+					check_arg_count!(args, 0);
+					Self::Real(r.abs())
+				}
+				"sqrt" => {
+					check_arg_count!(args, 0);
+					Self::Real(r.sqrt())
+				}
+				_ => return Err(CallError::UndefinedFunction),
+			},
+			Self::Integer(i) => match function {
+				"abs" => {
+					check_arg_count!(args, 0);
+					Self::Integer(i.abs())
+				}
+				_ => return Err(CallError::UndefinedFunction),
+			},
+			Self::String(s) => match function {
+				"len" => {
+					check_arg_count!(args, 0);
+					Variant::Integer(s.len() as isize)
+				}
+				_ => return Err(CallError::UndefinedFunction),
+			},
+			Self::Object(o) => return o.call(function, args, env),
+			_ => return Err(CallError::UndefinedFunction),
+		})
 	}
 
 	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>> {
@@ -392,15 +381,19 @@ impl VariantType for Variant {
 
 impl fmt::Debug for Variant {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		use core::fmt::Write;
 		match self {
 			Variant::None => f.write_str("none"),
 			Variant::Bool(false) => f.write_str("false"),
 			Variant::Bool(true) => f.write_str("true"),
-			Variant::Real(n) => write!(f, "{:?}", n),
-			Variant::Integer(n) => write!(f, "{:?}", n),
-			Variant::Char(n) => write!(f, "{:?}", n),
-			Variant::String(n) => write!(f, "{:?}", n),
-			//Variant::Object(n) => write!(f, "{}", n),
+			Variant::Real(n) => f.write_str(n.to_string().as_str()),
+			Variant::Integer(n) => f.write_str(n.to_string().as_str()),
+			Variant::Char(n) => f.write_char(*n),
+			Variant::String(n) => {
+				f.write_char('"')?;
+				f.write_str(n)?;
+				f.write_char('"')
+			}
 			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}
@@ -408,15 +401,15 @@ impl fmt::Debug for Variant {
 
 impl fmt::Display for Variant {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		use core::fmt::Write;
 		match self {
 			Variant::None => f.write_str("none"),
 			Variant::Bool(false) => f.write_str("false"),
 			Variant::Bool(true) => f.write_str("true"),
-			Variant::Real(n) => write!(f, "{}", n),
-			Variant::Integer(n) => write!(f, "{}", n),
-			Variant::Char(n) => write!(f, "{}", n),
+			Variant::Real(n) => f.write_str(n.to_string().as_str()),
+			Variant::Integer(n) => f.write_str(n.to_string().as_str()),
+			Variant::Char(n) => f.write_char(*n),
 			Variant::String(n) => f.write_str(n),
-			//Variant::Object(n) => write!(f, "{}", n),
 			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}

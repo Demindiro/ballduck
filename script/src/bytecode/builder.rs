@@ -156,8 +156,7 @@ where
 					// Parse expression
 					let (var_reg, iter_reg) = (self.curr_var_count, self.curr_var_count + 1);
 					self.curr_var_count += 2;
-					self.vars.insert(var, var_reg).unwrap_none();
-					frame_vars.push(var);
+					self.vars.insert(var, var_reg).expect_none(var);
 					let iter_reg = if let Some(r) = self.parse_expression(Some(iter_reg), expr)? {
 						self.curr_var_count -= 1;
 						r
@@ -201,6 +200,9 @@ where
 							_ => unreachable!(),
 						}
 					}
+
+					// Remove loop variable
+					self.vars.remove(var).expect(var);
 
 					self.curr_var_count = og_cvc;
 				}
@@ -327,6 +329,7 @@ where
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
 						self.curr_var_count = og_cvc;
 					} else {
+						dbg!(var);
 						return Err(ByteCodeError::UndefinedVariable);
 					}
 				}
@@ -334,6 +337,7 @@ where
 					if self.vars.insert(var, self.curr_var_count).is_none() {
 						self.curr_var_count += 1;
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
+						frame_vars.push(var);
 					} else {
 						return Err(ByteCodeError::DuplicateVar);
 					}
@@ -373,6 +377,7 @@ where
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
 						reg
 					} else {
+						dbg!(var);
 						return Err(ByteCodeError::UndefinedVariable);
 					};
 
@@ -402,6 +407,7 @@ where
 		}
 		self.min_var_count = self.min_var_count.max(self.vars.len() as u16);
 		for fv in frame_vars {
+			dbg!(fv);
 			self.vars.remove(fv).unwrap();
 		}
 		Ok(())
@@ -466,15 +472,17 @@ where
 						self.instr.push(Instruction::Load(store, local));
 						Ok(None)
 					} else {
+						dbg!(name);
 						Err(ByteCodeError::UndefinedVariable)
 					}
 				}
-				Atom::Real(r) => Ok(Some(self.add_const(Variant::Real(r)))),
-				Atom::Integer(i) => Ok(Some(self.add_const(Variant::Integer(i)))),
+				Atom::Real(r) => Ok(Some(self.add_const(V::new_real(r)))),
+				Atom::Integer(i) => Ok(Some(self.add_const(V::new_integer(i)))),
 				Atom::String(s) => {
-					let s = Variant::String(self.map_string(s));
+					let s = V::new_string(self.map_string(s));
 					Ok(Some(self.add_const(s)))
 				}
+				Atom::Bool(b) => Ok(Some(self.add_const(V::new_bool(b)))),
 			},
 			Expression::Function {
 				expr,
@@ -534,7 +542,7 @@ where
 						r
 					};
 					self.update_min_vars();
-					let i = self.add_const(Variant::Integer(i as isize));
+					let i = self.add_const(V::new_integer(i as isize));
 					self.instr.push(Instruction::SetIndex(r, array_reg, i));
 				}
 				self.curr_var_count = og_cvc;
@@ -570,7 +578,7 @@ where
 		}
 	}
 
-	fn add_const(&mut self, var: Variant) -> u16 {
+	fn add_const(&mut self, var: V) -> u16 {
 		let key = Constant::from_variant(var).expect("Failed to convert Variant to Constant");
 		match self.const_map.entry(key) {
 			Entry::Vacant(e) => {

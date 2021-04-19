@@ -72,6 +72,8 @@ pub enum Token<'src> {
 	Is,
 	Try,
 	Catch,
+	True,
+	False,
 }
 
 #[derive(Debug, PartialEq)]
@@ -285,6 +287,8 @@ impl Token<'_> {
 							"is" => Token::Is,
 							"try" => Token::Try,
 							"catch" => Token::Catch,
+							"true" => Token::True,
+							"false" => Token::False,
 							_ => Token::Name(s),
 						},
 						i as u32,

@@ -71,6 +71,7 @@ pub(crate) enum Atom<'src> {
 	Real(Real),
 	Integer(Integer),
 	String(&'src str),
+	Bool(bool),
 }
 
 #[derive(Debug, PartialEq)]
@@ -416,6 +417,8 @@ impl<'src> Expression<'src> {
 			}
 			Some(Token::String(s)) => Self::Atom(Atom::String(s)),
 			Some(Token::Number(n)) => expr_num(n, tokens, line!())?,
+			Some(Token::True) => Self::Atom(Atom::Bool(true)),
+			Some(Token::False) => Self::Atom(Atom::Bool(false)),
 			Some(Token::Name(name)) => match tokens.next() {
 				Some(Token::BracketRoundOpen) => expr_fn(
 					None,
@@ -445,17 +448,7 @@ impl<'src> Expression<'src> {
 						let og_mid = mid;
 						let mid = expr_name(mid);
 						match tokens.next() {
-							Some(Token::Op(opr)) => match tokens.next() {
-								Some(Token::Name(rhs)) => Self::parse_tri_op(
-									lhs,
-									opl,
-									mid,
-									opr,
-									Self::new_name(rhs),
-									tokens,
-								),
-								e => todo!("{:?}", e),
-							},
+							Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
 							Some(Token::BracketRoundOpen) => {
 								let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
 								match opl {
@@ -470,17 +463,7 @@ impl<'src> Expression<'src> {
 							Some(Token::BracketSquareOpen) => {
 								let mid = Self::parse_index_op(mid, tokens)?;
 								match tokens.next() {
-									Some(Token::Op(opr)) => match tokens.next() {
-										Some(Token::Name(rhs)) => Self::parse_tri_op(
-											lhs,
-											opl,
-											mid,
-											opr,
-											Self::new_name(rhs),
-											tokens,
-										),
-										e => todo!("{:?}", e),
-									},
+									Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
 									Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 										tokens.prev();
 										Ok(expr_op(lhs, opl, mid))
@@ -493,33 +476,30 @@ impl<'src> Expression<'src> {
 							e => todo!("{:?}", e),
 						}
 					}
-					Some(Token::Number(mid)) => match tokens.next() {
-						Some(Token::Op(opr)) => match tokens.next() {
-							Some(Token::Name(rhs)) => Self::parse_tri_op(
-								lhs,
-								opl,
-								expr_num(mid, tokens, line!())?,
-								opr,
-								Self::new_name(rhs),
-								tokens,
-							),
-							Some(Token::Number(rhs)) => Self::parse_tri_op(
-								lhs,
-								opl,
-								expr_num(mid, tokens, line!())?,
-								opr,
-								expr_num(rhs, tokens, line!())?,
-								tokens,
-							),
+					Some(Token::Number(mid)) => {
+						let mid = expr_num(mid, tokens, line!())?;
+						match tokens.next() {
+							Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
+							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+								tokens.prev();
+								Ok(expr_op(lhs, opl, mid))
+							}
+							None => Ok(expr_op(lhs, opl, mid)),
 							e => todo!("{:?}", e),
-						},
-						Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
-							tokens.prev();
-							Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?))
 						}
-						None => Ok(expr_op(lhs, opl, expr_num(mid, tokens, line!())?)),
-						e => todo!("{:?}", e),
 					},
+					Some(mid) if mid == Token::True || mid == Token::False => {
+						let mid =
+							Self::Atom(Atom::Bool(if mid == Token::True { true } else { false }));
+						match tokens.next() {
+							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+								tokens.prev();
+								Ok(expr_op(lhs, opl, mid))
+							}
+							None => Ok(expr_op(lhs, opl, mid)),
+							e => todo!("{:?}", e),
+						}
+					}
 					e => todo!("{:?}", e),
 				},
 				Token::BracketRoundClose
@@ -536,6 +516,15 @@ impl<'src> Expression<'src> {
 		} else {
 			Ok(lhs)
 		}
+	}
+
+	fn parse_tri_op_start(lhs: Self, opl: Op, mid: Self, opr: Op, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		let rhs = match tokens.next() {
+			Some(Token::Name(rhs)) => Self::new_name(rhs),
+			Some(Token::Number(rhs)) => Self::new_num(rhs, tokens)?,
+			e => todo!("{:?}", e),
+		};
+		Self::parse_tri_op(lhs, opl, mid, opr, rhs, tokens)
 	}
 
 	fn parse_tri_op(
@@ -568,6 +557,15 @@ impl<'src> Expression<'src> {
 
 	fn new_name(n: &'src str) -> Self {
 		Self::Atom(Atom::Name(n))
+	}
+
+	fn new_num(n: &'src str, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		parse_number(n)
+			.map(|n| Expression::Atom(n))
+			.or_else(|_| {
+				let (l, c) = tokens.position();
+				Error::new(ErrorType::NotANumber, l, c, line!())
+			})
 	}
 
 	fn parse_expr_list(
