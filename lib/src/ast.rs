@@ -1,6 +1,6 @@
 // Copyright (C) 2021  David Hoppenbrouwers
 //
-// This file is licensed under the MIT license. See script/LICENSE for details.
+// This file is licensed under the MIT license. See LICENSE for details.
 
 use crate::tokenizer::*;
 use core::convert::TryInto;

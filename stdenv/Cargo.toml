@@ -1,5 +1,5 @@
 [package]
-name = "ballduck_script"
+name = "ballscript_stdenv"
 version = "0.1.0"
 authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
 edition = "2018"
@@ -8,16 +8,6 @@ license = "MIT"
 [dependencies]
 rustc-hash = "*"
 unwrap_none = "*"
-ansi_term = { version = "*", optional = true }
-
-[lib]
-name = "ballscript"
-path = "src/lib.rs"
-
-[[bin]]
-name = "bs"
-path = "src/bin.rs"
 
 [features]
 unsafe-loop = []
-build-binary = ["ansi_term"]

@@ -12,10 +12,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "ballduck_script"
+name = "ballscript"
+version = "0.1.0"
+dependencies = [
+ "rustc-hash",
+ "unwrap_none",
+]
+
+[[package]]
+name = "bs"
 version = "0.1.0"
 dependencies = [
  "ansi_term",
+ "ballscript",
  "rustc-hash",
  "unwrap_none",
 ]

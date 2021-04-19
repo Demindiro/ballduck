@@ -1,0 +1,4 @@
+fn main()
+	var i = 12345
+	var f = 12345.6789
+	var s = "chicken"

@@ -1,0 +1,12 @@
+[package]
+name = "bs"
+version = "0.1.0"
+authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+rustc-hash = "*"
+unwrap_none = "*"
+ansi_term = "*"
+ballscript = { path = "../lib" }
