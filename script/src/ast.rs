@@ -503,6 +503,7 @@ impl<'src> Expression<'src> {
 					column: pos.1,
 				}
 			}
+			_ => todo!(),
 			_ => todo(tokens, line!())?,
 		};
 
@@ -606,9 +607,20 @@ impl<'src> Expression<'src> {
 		tokens: &mut TokenStream<'src>,
 	) -> Result<Self, Error> {
 		let rhs = match tokens.next() {
-			Some(Token::Name(rhs)) => Self::new_name(rhs, tokens),
+			Some(Token::Name(rhs)) => {
+				let lhs = Self::new_name(rhs, tokens);
+				match tokens.next() {
+					Some(Token::BracketRoundOpen) => todo(tokens, line!())?,
+					Some(Token::BracketSquareOpen) => Self::parse_index_op(lhs, tokens)?,
+					Some(_) => {
+						tokens.prev();
+						lhs
+					}
+					None => lhs,
+				}
+			}
 			Some(Token::Number(rhs)) => Self::new_num(rhs, tokens)?,
-			e => todo!("{:?}", e),
+			_ => todo(tokens, line!())?,
 		};
 		Self::parse_tri_op(lhs, opl, mid, opr, rhs, tokens)
 	}
@@ -623,9 +635,17 @@ impl<'src> Expression<'src> {
 	) -> Result<Self, Error> {
 		let (left, op, right) = if op_left >= op_right {
 			tokens.prev();
-			let right = Self::parse(tokens)?;
-			let left = Self::new_op(left, op_left, mid, tokens);
-			(left, op_right, right)
+			match tokens.next().unwrap() {
+				Token::BracketRoundClose | Token::BracketSquareClose | Token::BracketCurlyClose => {
+					(left, op_right, right)
+				}
+				_ => {
+					tokens.prev();
+					let right = Self::parse(tokens)?;
+					let left = Self::new_op(left, op_left, mid, tokens);
+					(left, op_right, right)
+				}
+			}
 		} else {
 			let right = Self::new_op(mid, op_right, right, tokens);
 			(left, op_left, right)
