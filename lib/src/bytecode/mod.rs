@@ -3,8 +3,10 @@
 // This file is licensed under the MIT license. See LICENSE for details.
 
 mod builder;
+mod tracer;
 
 pub(crate) use builder::{ByteCodeBuilder, ByteCodeError};
+pub use tracer::Tracer;
 
 use crate::script::CallError;
 use crate::{Array, Dictionary, Environment, VariantType};
@@ -12,14 +14,15 @@ use core::fmt::{self, Debug, Formatter};
 use core::mem;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
+use tracer::*;
 
-struct CallArgs {
+pub struct CallArgs {
 	store_in: Option<u16>,
 	func: Rc<str>,
 	args: Box<[u16]>,
 }
 
-enum Instruction {
+pub enum Instruction {
 	Call(u16, Box<CallArgs>),
 	CallSelf(Box<CallArgs>),
 	CallGlobal(Box<CallArgs>),
@@ -59,7 +62,7 @@ enum Instruction {
 	SetIndex(u16, u16, u16),
 }
 
-pub(crate) struct ByteCode<V>
+pub struct ByteCode<V>
 where
 	V: VariantType,
 {
@@ -67,6 +70,14 @@ where
 	param_count: u16,
 	var_count: u16,
 	consts: Vec<V>,
+	name: Rc<str>,
+}
+
+pub struct RunState<V>
+where
+	V: VariantType,
+{
+	vars: Vec<V>,
 }
 
 #[derive(Debug)]
@@ -86,88 +97,80 @@ pub type CallResult<T> = Result<T, CallError>;
 
 #[cfg(not(feature = "unsafe-loop"))]
 macro_rules! reg {
-	(ref $vars:ident $reg:ident) => {
-		$vars.get(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+	(ref $state:ident $reg:ident) => {
+		$state.vars.get(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
 	};
-	(mut $vars:ident $reg:ident) => {
-		*reg!(ref mut $vars $reg)
+	(mut $state:ident $reg:ident) => {
+		*reg!(ref mut $state $reg)
 	};
-	(ref mut $vars:ident $reg:expr) => {
-		$vars.get_mut(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+	(ref mut $state:ident $reg:expr) => {
+		$state.vars.get_mut(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
 	};
 }
 
 #[cfg(feature = "unsafe-loop")]
 macro_rules! reg {
-	(ref $vars:ident $reg:ident) => {
-		unsafe { $vars.get_unchecked(*$reg as usize) }
+	(ref $state:ident $reg:ident) => {
+		unsafe { $state.vars.get_unchecked(*$reg as usize) }
 	};
-	(mut $vars:ident $reg:ident) => {
-		*reg!(ref mut $vars $reg)
+	(mut $state:ident $reg:ident) => {
+		*reg!(ref mut $state $reg)
 	};
-	(ref mut $vars:ident $reg:expr) => {
-		unsafe { $vars.get_unchecked_mut(*$reg as usize) }
+	(ref mut $state:ident $reg:expr) => {
+		unsafe { $state.vars.get_unchecked_mut(*$reg as usize) }
 	};
 }
 
 macro_rules! run_op {
-	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		reg!(mut $vars $r) = (reg!(ref $vars $a).$op(reg!(ref $vars $b))).map_err(err::call)?;
+	($state:ident, $r:ident = $a:ident $op:tt $b:ident) => {
+		reg!(mut $state $r) = (reg!(ref $state $a).$op(reg!(ref $state $b))).map_err(err::call)?;
 	};
 }
 
 macro_rules! run_cmp {
-	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		reg!(mut $vars $r) = (reg!(ref $vars $a) $op reg!(ref $vars $b)).into();
+	($state:ident, $r:ident = $a:ident $op:tt $b:ident) => {
+		reg!(mut $state $r) = (reg!(ref $state $a) $op reg!(ref $state $b)).into();
 	};
 }
 
-/*
-pub trait Math<V>
-where
-	for<'a> &'a V: Add<&'a V, Output = CallResult<V>>
-		+ Sub<&'a V, Output = CallResult<V>>
-		+ Mul<&'a V, Output = CallResult<V>>
-		+ Div<&'a V, Output = CallResult<V>>
-		+ Rem<&'a V, Output = CallResult<V>>
-		+ Rem<&'a V, Output = CallResult<V>>
-		+ BitAnd<&'a V, Output = CallResult<V>>
-		+ BitOr<&'a V, Output = CallResult<V>>
-		+ BitXor<&'a V, Output = CallResult<V>>
-		+ Shr<&'a V, Output = CallResult<V>>
-		+ Shl<&'a V, Output = CallResult<V>>,
-{
-}
-*/
-
-/// The interpreter
 impl<V> ByteCode<V>
 where
 	V: VariantType,
 {
-	pub(crate) fn run(
+	pub(crate) fn run<T>(
 		&self,
 		functions: &FxHashMap<Rc<str>, Self>,
 		locals: &mut [V],
 		args: &[V],
 		env: &Environment<V>,
-	) -> Result<V, RunError> {
+		tracer: &T,
+	) -> Result<V, RunError>
+	where
+		T: Tracer<V>,
+	{
 		if args.len() != self.param_count as usize {
 			return Err(RunError::IncorrectArgumentCount);
 		}
+
 		let mut vars = Vec::with_capacity(self.var_count as usize + self.consts.len());
 		for a in args.iter() {
 			vars.push(a.clone());
 		}
 		vars.resize(self.var_count as usize, V::default());
 		vars.extend(self.consts.iter().cloned());
+
+		let mut state = RunState { vars };
+
 		let mut ip = 0;
 		let mut iterators = Vec::new();
 		let mut call_args = Vec::new();
-		loop {
+
+		let _trace_run = TraceRun::new(tracer, self);
+
+		let ret = loop {
 			if let Some(instr) = self.code.get(ip as usize) {
-				#[cfg(feature = "print-instructions")]
-				println!("{:<4}: {:?}", ip, instr);
+				let _trace_instruction = TraceInstruction::new(tracer, self, ip, instr);
+				tracer.peek(self, &mut state);
 				ip += 1;
 				use Instruction::*;
 				match instr {
@@ -180,13 +183,15 @@ where
 						},
 					) => {
 						for a in args.iter() {
-							call_args.push(reg!(ref vars a).clone());
+							call_args.push(reg!(ref state a).clone());
 						}
-						let obj = reg!(ref vars reg);
+						let obj = reg!(ref state reg);
+						let trace_call = TraceCall::new(tracer, self, func);
 						let r = obj.call(func, &call_args[..], env).map_err(err::call)?;
+						mem::drop(trace_call);
 						call_args.clear();
 						if let Some(reg) = store_in {
-							reg!(mut vars reg) = r;
+							reg!(mut state reg) = r;
 						}
 					}
 					CallGlobal(box CallArgs {
@@ -195,12 +200,14 @@ where
 						args,
 					}) => {
 						for a in args.iter() {
-							call_args.push(reg!(ref vars a).clone());
+							call_args.push(reg!(ref state a).clone());
 						}
+						let trace_call = TraceCall::new(tracer, self, func);
 						let r = env.call(func, &call_args[..]).map_err(err::call)?;
+						mem::drop(trace_call);
 						call_args.clear();
 						if let Some(reg) = store_in {
-							reg!(mut vars reg) = r;
+							reg!(mut state reg) = r;
 						}
 					}
 					CallSelf(box CallArgs {
@@ -209,22 +216,24 @@ where
 						args,
 					}) => {
 						for a in args.iter() {
-							call_args.push(reg!(ref vars a).clone());
+							call_args.push(reg!(ref state a).clone());
 						}
 						let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
-						let r = r.run(functions, locals, &call_args[..], env)?;
+						let trace_call = TraceCall::new(tracer, self, func);
+						let r = r.run(functions, locals, &call_args[..], env, tracer)?;
+						mem::drop(trace_call);
 						call_args.clear();
 						if let Some(reg) = store_in {
-							reg!(mut vars reg) = r;
+							reg!(mut state reg) = r;
 						}
 					}
-					RetSome(reg) => break Ok(mem::take(reg!(ref mut vars reg))),
+					RetSome(reg) => break Ok(mem::take(reg!(ref mut state reg))),
 					RetNone => break Ok(V::default()),
 					Iter(reg, iter, jmp_ip) => {
-						let iter = reg!(ref vars iter);
+						let iter = reg!(ref state iter);
 						let mut iter = iter.iter().map_err(err::call)?;
 						if let Some(e) = iter.next() {
-							reg!(mut vars reg) = e;
+							reg!(mut state reg) = e;
 							iterators.push(iter);
 						} else {
 							ip = *jmp_ip;
@@ -239,15 +248,15 @@ where
 							iterators.get_unchecked_mut(i)
 						};
 						if let Some(e) = iter.next() {
-							reg!(mut vars reg) = e;
+							reg!(mut state reg) = e;
 							ip = *jmp_ip;
 						} else {
 							let _ = iterators.pop().unwrap();
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
-						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
-							reg!(mut vars reg) = V::new_bool(b);
+						if let Ok(b) = mem::take(reg!(ref mut state reg)).as_bool() {
+							reg!(mut state reg) = V::new_bool(b);
 							if !b {
 								ip = *jmp_ip;
 							}
@@ -256,8 +265,8 @@ where
 						}
 					}
 					JmpNotIf(reg, jmp_ip) => {
-						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
-							reg!(mut vars reg) = V::new_bool(b);
+						if let Ok(b) = mem::take(reg!(ref mut state reg)).as_bool() {
+							reg!(mut state reg) = V::new_bool(b);
 							if b {
 								ip = *jmp_ip;
 							}
@@ -266,52 +275,67 @@ where
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
-					Add(r, a, b) => run_op!(vars, r = a add b),
-					Sub(r, a, b) => run_op!(vars, r = a sub b),
-					Mul(r, a, b) => run_op!(vars, r = a mul b),
-					Div(r, a, b) => run_op!(vars, r = a div b),
-					Rem(r, a, b) => run_op!(vars, r = a rem b),
-					And(r, a, b) => run_op!(vars, r = a bitand b),
-					Or(r, a, b) => run_op!(vars, r = a bitor b),
-					Xor(r, a, b) => run_op!(vars, r = a bitxor b),
-					Shl(r, a, b) => run_op!(vars, r = a lhs b),
-					Shr(r, a, b) => run_op!(vars, r = a rhs b),
-					LessEq(r, a, b) => run_cmp!(vars, r = a <= b),
-					Less(r, a, b) => run_cmp!(vars, r = a < b),
-					Neq(r, a, b) => run_cmp!(vars, r = a != b),
-					Eq(r, a, b) => run_cmp!(vars, r = a == b),
+					Add(r, a, b) => run_op!(state, r = a add b),
+					Sub(r, a, b) => run_op!(state, r = a sub b),
+					Mul(r, a, b) => run_op!(state, r = a mul b),
+					Div(r, a, b) => run_op!(state, r = a div b),
+					Rem(r, a, b) => run_op!(state, r = a rem b),
+					And(r, a, b) => run_op!(state, r = a bitand b),
+					Or(r, a, b) => run_op!(state, r = a bitor b),
+					Xor(r, a, b) => run_op!(state, r = a bitxor b),
+					Shl(r, a, b) => run_op!(state, r = a lhs b),
+					Shr(r, a, b) => run_op!(state, r = a rhs b),
+					LessEq(r, a, b) => run_cmp!(state, r = a <= b),
+					Less(r, a, b) => run_cmp!(state, r = a < b),
+					Neq(r, a, b) => run_cmp!(state, r = a != b),
+					Eq(r, a, b) => run_cmp!(state, r = a == b),
 					Store(r, l) => {
 						*locals
 							.get_mut(*l as usize)
-							.ok_or(RunError::LocalOutOfBounds)? = reg!(ref vars r).clone();
+							.ok_or(RunError::LocalOutOfBounds)? = reg!(ref state r).clone();
 					}
 					Load(r, l) => {
-						reg!(mut vars r) = locals
+						reg!(mut state r) = locals
 							.get(*l as usize)
 							.ok_or(RunError::LocalOutOfBounds)?
 							.clone();
 					}
-					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
+					Move(d, s) => reg!(mut state d) = reg!(ref state s).clone(),
 					NewArray(r, c) => {
-						reg!(mut vars r) = V::new_object(Rc::new(Array::with_len(*c)))
+						reg!(mut state r) = V::new_object(Rc::new(Array::with_len(*c)))
 					}
 					NewDictionary(r, c) => {
 						let d = Rc::new(Dictionary::with_capacity(*c));
-						reg!(mut vars r) = V::new_object(d);
+						reg!(mut state r) = V::new_object(d);
 					}
 					GetIndex(r, o, i) => {
-						reg!(mut vars r) = reg!(ref vars o)
-							.index(reg!(ref vars i))
+						reg!(mut state r) = reg!(ref state o)
+							.index(reg!(ref state i))
 							.map_err(err::call)?
 					}
-					SetIndex(r, o, i) => reg!(ref vars o)
-						.set_index(reg!(ref vars i), reg!(ref vars r).clone())
+					SetIndex(r, o, i) => reg!(ref state o)
+						.set_index(reg!(ref state i), reg!(ref state r).clone())
 						.map_err(err::call)?,
 				}
 			} else {
 				break Err(RunError::IpOutOfBounds);
 			}
-		}
+		};
+
+		ret
+	}
+
+	pub fn name(&self) -> &Rc<str> {
+		&self.name
+	}
+}
+
+impl<V> RunState<V>
+where
+	V: VariantType,
+{
+	pub fn variables(&mut self) -> &mut [V] {
+		&mut self.vars[..]
 	}
 }
 

@@ -156,11 +156,13 @@ where
 			}
 		}
 
+		let name = builder.map_string(function.name);
 		Ok(ByteCode {
 			code: builder.instr,
 			var_count: builder.min_var_count,
 			param_count: builder.param_count,
 			consts: builder.consts,
+			name,
 		})
 	}
 

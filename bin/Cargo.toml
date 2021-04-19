@@ -10,3 +10,6 @@ rustc-hash = "*"
 unwrap_none = "*"
 ansi_term = "*"
 ballscript = { path = "../lib" }
+
+[features]
+print-instructions = []

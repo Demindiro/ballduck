@@ -1,6 +1,6 @@
 // Copyright (C) 2021  David Hoppenbrouwers
 //
-// This file is licensed under the MIT license. See script/LICENSE for details.
+// This file is licensed under the MIT license. See LICENSE for details.
 
 #![allow(unstable_name_collisions)] // `unwrap_none` and `expect_none` are removed
 #![feature(box_patterns)]
@@ -15,7 +15,7 @@ mod tokenizer;
 mod types;
 mod variant;
 
-pub use bytecode::CallResult;
+pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};
 pub use environment::Environment;
 pub use script::{CallError, Class, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
@@ -66,12 +66,14 @@ impl<'a> ParseError<'a> {
 	}
 }
 
-pub fn parse<'a, 'b: 'a, V>(
+pub fn parse<'a, 'b: 'a, V, T>(
 	source: &'a str,
 	string_map: &'b mut FxHashSet<Rc<str>>,
-) -> Result<Class<V>, ParseError<'a>>
+	tracer: T,
+) -> Result<Class<V, T>, ParseError<'a>>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
 	let tks = TokenStream::parse(source).unwrap();
 	let ast = ast::Script::parse(tks).map_err(|e| ParseError::new_ast(source, e))?;
@@ -93,7 +95,7 @@ where
 		hm
 	};
 
-	let mut script = Script::new(locals);
+	let mut script = Script::new(locals, tracer);
 
 	let mut methods = FxHashMap::with_capacity_and_hasher(ast.functions.len(), Default::default());
 	for f in ast.functions.iter() {

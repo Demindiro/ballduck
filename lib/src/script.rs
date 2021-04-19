@@ -3,7 +3,7 @@
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
 use crate::bytecode::{ByteCode, CallResult, RunError};
-use crate::{Environment, VariantType};
+use crate::{Environment, Tracer, VariantType};
 use core::any::{Any, TypeId};
 use core::fmt;
 use rustc_hash::FxHashMap;
@@ -11,27 +11,31 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub struct Class<V>(Arc<Script<V>>)
+pub struct Class<V, T>(Arc<Script<V, T>>)
 where
-	V: VariantType;
+	V: VariantType,
+	T: Tracer<V>;
 
 pub type ScriptObject<V> = Rc<dyn ScriptType<V>>;
 
 #[derive(Debug)]
-pub(crate) struct Script<V>
+pub(crate) struct Script<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
 	pub(crate) functions: FxHashMap<Rc<str>, ByteCode<V>>,
 	pub(crate) locals: FxHashMap<Rc<str>, u16>,
+	tracer: T,
 }
 
 #[derive(Debug)]
-pub struct Instance<V>
+pub struct Instance<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
-	script: Arc<Script<V>>,
+	script: Arc<Script<V, T>>,
 	// TODO we have 3 options to solve the `A.foo() -> B.bar() -> A.foo()` problem:
 	// * We use `Cell<Box<[_]>>`. This *should* have relatively little overhead but is
 	//   very unintuitive, and the second `A.foo()` call will only see old variable names.
@@ -65,6 +69,7 @@ pub trait ScriptType<V>: 'static
 where
 	V: VariantType,
 {
+	/// Calls the method with the given name on this script instance
 	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V>;
 
 	#[inline]
@@ -117,18 +122,20 @@ where
 	}
 }
 
-impl<V> Script<V>
+impl<V, T: 'static> Script<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
-	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>) -> Self {
+	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>, tracer: T) -> Self {
 		Self {
 			functions: FxHashMap::with_hasher(Default::default()),
 			locals,
+			tracer,
 		}
 	}
 
-	fn call(
+	fn call_traced(
 		&self,
 		function: &str,
 		locals: &mut [V],
@@ -137,7 +144,7 @@ where
 	) -> CallResult<V> {
 		if let Some(function) = self.functions.get(function) {
 			function
-				.run(&self.functions, locals, args, &env)
+				.run(&self.functions, locals, args, &env, &self.tracer)
 				.map_err(CallError::RunError)
 		} else {
 			Err(CallError::UndefinedFunction)
@@ -145,11 +152,12 @@ where
 	}
 }
 
-impl<V> Class<V>
+impl<V, T> Class<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
-	pub fn instance(&self) -> Instance<V> {
+	pub fn instance(&self) -> Instance<V, T> {
 		let mut locals = Vec::new();
 		locals.resize(self.0.locals.len(), V::default());
 		Instance {
@@ -159,31 +167,34 @@ where
 	}
 }
 
-impl<V> From<Script<V>> for Class<V>
+impl<V, T> From<Script<V, T>> for Class<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
-	fn from(script: Script<V>) -> Self {
+	fn from(script: Script<V, T>) -> Self {
 		Self(Arc::new(script))
 	}
 }
 
-impl<V> ScriptType<V> for Instance<V>
+impl<V, T: 'static> ScriptType<V> for Instance<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
 	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
-			self.script.call(function, &mut vars, args, env)
+			self.script.call_traced(function, &mut vars, args, env)
 		} else {
 			Err(CallError::AlreadyBorrowed)
 		}
 	}
 }
 
-impl<V> fmt::Debug for Class<V>
+impl<V, T> fmt::Debug for Class<V, T>
 where
 	V: VariantType,
+	T: Tracer<V>,
 {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if f.alternate() {
