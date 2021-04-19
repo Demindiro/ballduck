@@ -29,6 +29,11 @@ pub(crate) enum Statement<'src> {
 		column: u32,
 		var: &'src str,
 	},
+	LooseExpression {
+		line: u32,
+		column: u32,
+		expr: Expression<'src>,
+	},
 	Assign {
 		line: u32,
 		column: u32,
@@ -444,6 +449,12 @@ impl<'src> Function<'src> {
 						}),
 						_ => unreachable!(),
 					}
+				}
+				Some(Token::BracketRoundOpen) => {
+					let (line, column) = tokens.position();
+					tokens.prev();
+					let expr = Expression::parse(tokens)?;
+					lines.push(Statement::LooseExpression { expr, line, column });
 				}
 				None => return Ok((lines, 0)),
 				Some(Token::Indent(i)) if i < expected_indent => return Ok((lines, i)),

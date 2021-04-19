@@ -391,6 +391,9 @@ where
 						err!(line, column, UndefinedVariable, var);
 					}
 				}
+				Statement::LooseExpression { expr, .. } => {
+					self.parse_expression(None, expr)?;
+				}
 				Statement::Declare { var, line, column } => {
 					if self.vars.insert(var, self.curr_var_count).is_none() {
 						self.curr_var_count += 1;
