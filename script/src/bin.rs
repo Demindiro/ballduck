@@ -72,7 +72,7 @@ fn print_parse_error(error: ParseError) {
 	} else {
 		error.line - min
 	};
-	for (li, line) in error.source.lines().enumerate().skip(min as usize) {
+	for (li, line) in error.source.lines().enumerate().skip(min as usize).take(5) {
 		let _ = if li == error.line as usize {
 			write!(writer, "{:>4} > ", li + 1)
 		} else {
