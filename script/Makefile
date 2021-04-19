@@ -27,4 +27,5 @@ get-size:
 
 test:
 	cargo build
-	../target/debug/bs $$PWD/test/malformed/undefined_variable.bs
+	../target/debug/bs $$PWD/test/malformed/undefined_variable.bs || true
+	../target/debug/bs $$PWD/test/expression/indices.bs || true

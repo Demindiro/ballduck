@@ -11,7 +11,6 @@ fn main()
 	for k in dict
 		print("  ", k, ": ", dict[k])
 
-	print("Using array elements in expressions:")
-	var sum = dict[3] + dict["cat"]
-	#var sum = dict[3] + " is not a " + dict["cat"]
+	print("Using dictionary elements in expressions:")
+	var sum = dict[3] + " is not a " + dict["cat"]
 	print("  ", sum)

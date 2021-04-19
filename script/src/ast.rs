@@ -273,16 +273,13 @@ impl<'src> Function<'src> {
 								lines.push(Statement::Expression { expr, line, column });
 							}
 						}
-						Some(Token::Assign(op)) => match op {
-							AssignOp::None => lines.push(Statement::Assign {
-								var: name,
-								assign_op: op,
-								expr: Expression::parse(tokens)?,
-								line,
-								column,
-							}),
-							_ => todo(tokens, line!())?,
-						},
+						Some(Token::Assign(op)) => lines.push(Statement::Assign {
+							var: name,
+							assign_op: op,
+							expr: Expression::parse(tokens)?,
+							line,
+							column,
+						}),
 						_ => todo(tokens, line!())?,
 					}
 				}

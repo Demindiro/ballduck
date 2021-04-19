@@ -1,25 +1,21 @@
 fn main()
 
-	for __ in 100
+	var n_sqrt = 256
+	var n = n_sqrt * n_sqrt
+	var array = []
 
-		var n_sqrt = 256
-		var n = n_sqrt * n_sqrt
-		var array = []
+	for i in n
+		var _ = array.push(true)
 
-		for i in n
-			var _ = array.push(true)
+	for i in n_sqrt - 2
+		i += 2
+		if array[i]
+			var j = i * i
+			while j < n
+				array[j] = false
+				j += i
 
-		for i in n_sqrt - 2
-			i = i + 2
-			if array[i]
-				var i2 = i * i
-				var j = i2
-				while j < n
-					array[j] = false
-					j = j + i
-
-		for i in array.len()
-			var a = array[i]
-			if a == false
-				continue
-				print(a)
+	for i in array.len()
+		var a = array[i]
+		if a == false
+			print(a)

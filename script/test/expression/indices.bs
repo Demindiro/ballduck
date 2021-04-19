@@ -1,0 +1,9 @@
+fn main()
+	var arr = [1, 2, 3]
+	var _
+
+	_ = arr[0] * arr[1] * arr[2]
+	_ = arr[0] * arr[1] + arr[2]
+	_ = arr[0] + arr[1] * arr[2]
+	_ = 0 + arr[0] * arr[1]
+	_ = arr[0] + 0 * arr[1]

@@ -386,6 +386,23 @@ impl<'src> TokenStream<'src> {
 	}
 }
 
+/// Converts [`AssignOp`] into [`Op`] if applicable, otherwise it returns [`None`].
+impl From<AssignOp> for Option<Op> {
+	fn from(op: AssignOp) -> Self {
+		Some(match op {
+			AssignOp::None => return None,
+			AssignOp::Add => Op::Add,
+			AssignOp::Sub => Op::Sub,
+			AssignOp::Mul => Op::Mul,
+			AssignOp::Div => Op::Div,
+			AssignOp::Rem => Op::Rem,
+			AssignOp::And => Op::And,
+			AssignOp::Or => Op::Or,
+			AssignOp::Xor => Op::Xor,
+		})
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::*;

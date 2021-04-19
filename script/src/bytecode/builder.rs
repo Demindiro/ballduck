@@ -335,11 +335,25 @@ where
 					line,
 					column,
 				} => {
-					assert_eq!(*assign_op, AssignOp::None, "TODO handle assign ops");
 					if let Some(&reg) = self.vars.get(var) {
 						let expr = self.parse_expression(Some(reg), expr)?;
-						if let Some(expr) = expr {
-							self.instr.push(Instruction::Move(reg, expr));
+						if let AssignOp::None = assign_op {
+							if let Some(expr) = expr {
+								self.instr.push(Instruction::Move(reg, expr));
+							}
+						} else {
+							let expr = if let Some(expr) = expr { expr } else { reg };
+							self.instr.push(match assign_op {
+								AssignOp::None => unreachable!(),
+								AssignOp::Add => Instruction::Add(reg, reg, expr),
+								AssignOp::Sub => Instruction::Sub(reg, reg, expr),
+								AssignOp::Mul => Instruction::Mul(reg, reg, expr),
+								AssignOp::Div => Instruction::Div(reg, reg, expr),
+								AssignOp::Rem => Instruction::Rem(reg, reg, expr),
+								AssignOp::And => Instruction::And(reg, reg, expr),
+								AssignOp::Or => Instruction::Or(reg, reg, expr),
+								AssignOp::Xor => Instruction::Xor(reg, reg, expr),
+							});
 						}
 					} else if let Some(local) = self.locals.get(var as &str) {
 						let og_cvc = self.curr_var_count;
@@ -351,8 +365,27 @@ where
 						} else {
 							self.curr_var_count
 						};
+						if let AssignOp::None = assign_op {
+						} else {
+							let tmp_reg = self.curr_var_count;
+							self.curr_var_count += 1;
+							self.update_min_vars();
+							self.instr.push(Instruction::Load(tmp_reg, *local));
+							self.instr.push(match assign_op {
+								AssignOp::None => unreachable!(),
+								AssignOp::Add => Instruction::Add(e, tmp_reg, e),
+								AssignOp::Sub => Instruction::Sub(e, tmp_reg, e),
+								AssignOp::Mul => Instruction::Mul(e, tmp_reg, e),
+								AssignOp::Div => Instruction::Div(e, tmp_reg, e),
+								AssignOp::Rem => Instruction::Rem(e, tmp_reg, e),
+								AssignOp::And => Instruction::And(e, tmp_reg, e),
+								AssignOp::Or => Instruction::Or(e, tmp_reg, e),
+								AssignOp::Xor => Instruction::Xor(e, tmp_reg, e),
+							});
+							self.curr_var_count -= 1;
+						}
 						self.instr.push(Instruction::Store(e, *local));
-						self.min_var_count = self.min_var_count.max(self.curr_var_count);
+						self.update_min_vars();
 						self.curr_var_count = og_cvc;
 					} else {
 						err!(line, column, UndefinedVariable, var);
