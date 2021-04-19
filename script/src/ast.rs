@@ -412,8 +412,8 @@ impl<'src> Function<'src> {
 						Some(Token::Indent(_)) => {
 							tokens.prev();
 						}
+						None => (),
 						Some(tk) => err!(UnexpectedToken, tk, tokens),
-						None => err!(UnexpectedEOF, tokens),
 					}
 				}
 				Some(tk) if tk == Token::Continue || tk == Token::Break => {
@@ -503,7 +503,6 @@ impl<'src> Expression<'src> {
 					column: pos.1,
 				}
 			}
-			_ => todo!(),
 			_ => todo(tokens, line!())?,
 		};
 
