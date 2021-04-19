@@ -897,23 +897,33 @@ fn parse_number(s: &str) -> Result<Atom, NumberParseError> {
 			if chars.peek().unwrap() == &'.' {
 				return Err(NumberParseError::SeparatorInWrongPosition);
 			}
-			let mut n = 0.0;
+			let (mut uh, mut lh) = (0u64, 0u64);
 			loop {
 				let c = chars.next().unwrap();
 				if c == '.' {
 					break;
 				}
-				n *= base as Real;
-				n += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as Real;
+				uh *= base as u64;
+				uh += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as u64;
 			}
 			if chars.peek() == None {
 				return Err(NumberParseError::SeparatorInWrongPosition);
 			}
-			let mut i = 1.0 / base as Real;
-			for c in chars {
-				n += (c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as Real) * i;
-				i /= base as Real;
+			let mut div = base as u64;
+			while let Some(c) = chars.next() {
+				lh += c.to_digit(base).ok_or(NumberParseError::InvalidDigit)? as u64;
+				lh *= base as u64;
+				div *= base as u64;
+				if div > (1 << 53) {
+					// We reached maximum precision
+					break;
+				}
 			}
+			// Validate the other digits just in case
+			for c in chars {
+				c.to_digit(base).ok_or(NumberParseError::InvalidDigit)?;
+			}
+			let n = uh as f64 + (lh as f64 / div as f64);
 			Ok(Atom::Real(if neg { -n } else { n }))
 		} else {
 			let mut n = 0;
