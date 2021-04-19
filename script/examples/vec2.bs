@@ -1,9 +1,6 @@
 fn main()
-	for _ in 20_000_000
-		#args(1, 2)
-		#empty()
+	for _ in 10_000_000
 		length(0.5, 0.7)
-		#length_squared(0.5, 0.7)
 	print(length(0.5, 0.7))
 	pass
 
@@ -11,11 +8,6 @@ fn main()
 fn length(x, y)
 	return (x * x + y * y).sqrt()
 
+
 fn length_squared(x, y)
 	return x * x + y * y
-
-fn empty()
-	pass
-
-fn args(x, y)
-	pass

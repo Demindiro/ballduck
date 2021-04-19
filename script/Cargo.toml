@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 rustc-hash = "*"
 unwrap_none = "*"
+ansi_term = { version = "*", optional = true }
 
 [lib]
 name = "ballscript"
@@ -19,3 +20,4 @@ path = "src/bin.rs"
 
 [features]
 unsafe-loop = []
+build-binary = ["ansi_term"]
