@@ -551,8 +551,13 @@ impl<'src> Expression<'src> {
 							e => todo!("{:?}", e),
 						}
 					}
-					Some(Token::Number(mid)) => {
-						let mid = Self::new_num(mid, tokens)?;
+					Some(Token::Number(_)) | Some(Token::String(_)) => {
+						tokens.prev();
+						let mid = match tokens.next().unwrap() {
+							Token::Number(n) => Self::new_num(n, tokens)?,
+							Token::String(n) => Self::new_str(n, tokens),
+							_ => unreachable!(),
+						};
 						match tokens.next() {
 							Some(Token::Op(opr)) => {
 								Self::parse_tri_op_start(lhs, opl, mid, opr, tokens)
