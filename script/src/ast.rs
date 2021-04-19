@@ -607,15 +607,15 @@ impl<'src> Expression<'src> {
 	) -> Result<Self, Error> {
 		let rhs = match tokens.next() {
 			Some(Token::Name(rhs)) => {
-				let lhs = Self::new_name(rhs, tokens);
+				let rhs = Self::new_name(rhs, tokens);
 				match tokens.next() {
 					Some(Token::BracketRoundOpen) => todo(tokens, line!())?,
-					Some(Token::BracketSquareOpen) => Self::parse_index_op(lhs, tokens)?,
+					Some(Token::BracketSquareOpen) => Self::parse_index_op(rhs, tokens)?,
 					Some(_) => {
 						tokens.prev();
-						lhs
+						rhs
 					}
-					None => lhs,
+					None => rhs,
 				}
 			}
 			Some(Token::Number(rhs)) => Self::new_num(rhs, tokens)?,
@@ -634,17 +634,17 @@ impl<'src> Expression<'src> {
 	) -> Result<Self, Error> {
 		let (left, op, right) = if op_left >= op_right {
 			tokens.prev();
-			match tokens.next().unwrap() {
+			let right = match tokens.next().unwrap() {
 				Token::BracketRoundClose | Token::BracketSquareClose | Token::BracketCurlyClose => {
-					(left, op_right, right)
+					right
 				}
 				_ => {
 					tokens.prev();
-					let right = Self::parse(tokens)?;
-					let left = Self::new_op(left, op_left, mid, tokens);
-					(left, op_right, right)
+					Self::parse(tokens)?
 				}
-			}
+			};
+			let left = Self::new_op(left, op_left, mid, tokens);
+			(left, op_right, right)
 		} else {
 			let right = Self::new_op(mid, op_right, right, tokens);
 			(left, op_left, right)
