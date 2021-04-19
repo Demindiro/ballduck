@@ -4,10 +4,8 @@
 
 use ballscript::{CallError, Environment, ParseError, ScriptType, Variant};
 use rustc_hash::FxHashSet;
-use std::env;
-use std::fs;
-use std::io;
-use std::process;
+use std::{env, fs, io, process};
+use ansi_term::Color;
 
 pub fn main() {
 	let mut args = env::args();
@@ -32,7 +30,7 @@ pub fn main() {
 					}
 				}
 				Err(e) => {
-					print_parse_error(e);
+					let _ = print_parse_error(e);
 					1
 				}
 			},
@@ -62,10 +60,12 @@ fn create_env() -> Environment<Variant> {
 	env
 }
 
-fn print_parse_error(error: ParseError) {
+#[cold]
+fn print_parse_error(error: ParseError) -> io::Result<()> {
 	use io::Write;
 	let mut writer = io::BufWriter::new(io::stderr());
-	let _ = writeln!(writer, "Error during parsing: {}", error);
+	write!(writer, "{}", Color::Red.bold().paint("Error during parsing: "))?;
+	writeln!(writer, "{}", Color::White.bold().paint(error.to_string()))?;
 	let min = 2;
 	let min = if error.line < min {
 		0
@@ -73,11 +73,11 @@ fn print_parse_error(error: ParseError) {
 		error.line - min
 	};
 	for (li, line) in error.source.lines().enumerate().skip(min as usize).take(5) {
-		let _ = if li == error.line as usize {
-			write!(writer, "{:>4} > ", li + 1)
+		if li == error.line as usize {
+			write!(writer, "{}", Color::Blue.bold().paint(format!("{:>4} > ", li + 1)))?;
 		} else {
-			write!(writer, "{:>4} | ", li + 1)
-		};
+			write!(writer, "{}", Color::Blue.bold().paint(format!("{:>4} | ", li + 1)))?;
+		}
 		for c in line.bytes() {
 			let _ = if c == b'\t' {
 				writer.write(b"    ")
@@ -89,21 +89,21 @@ fn print_parse_error(error: ParseError) {
 		if li == error.line as usize {
 			let _ = writer.write(b"       ");
 			for (i, c) in line.bytes().enumerate() {
-				let p = if i == error.column as usize {
-					b"^"
+				if i == error.column as usize {
+					writeln!(writer, "{}", Color::Red.bold().paint("^"))?;
+					break;
+				} else if c == b'\t' {
+					writer.write(b"    ")?;
 				} else {
-					b" "
-				};
-				for _ in 0..(if c == b'\t' { 4 } else { 1 }) {
-					let _ = writer.write(p);
+					writer.write(b" ")?;
 				}
 			}
-			let _ = writer.write(b"\n");
 		}
 	}
-	let _ = writer.flush();
+	writer.flush()
 }
 
+#[cold]
 fn print_call_error(error: CallError) {
 	eprintln!("An error was thrown: {:?}", error);
 }
