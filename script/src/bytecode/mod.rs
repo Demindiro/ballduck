@@ -4,7 +4,7 @@
 
 mod builder;
 
-pub(crate) use builder::ByteCodeBuilder;
+pub(crate) use builder::{ByteCodeBuilder, ByteCodeError};
 
 use crate::script::CallError;
 use crate::{Array, Dictionary, Environment, VariantType};

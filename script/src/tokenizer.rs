@@ -302,8 +302,8 @@ impl Token<'_> {
 
 impl<'src> TokenStream<'src> {
 	pub fn parse(mut source: &'src str) -> Result<Self, TokenStreamError> {
-		let mut line = 1;
-		let mut column = 1;
+		let mut line = 0;
+		let mut column = 0;
 		let mut tokens = Vec::new();
 		let mut start = true;
 		loop {
@@ -311,8 +311,8 @@ impl<'src> TokenStream<'src> {
 				Ok((tk, len)) => {
 					let prev_col = if let Token::Indent(i) = tk {
 						line += 1;
-						column = i as u32 + 1;
-						1
+						column = i as u32;
+						0
 					} else {
 						let c = column;
 						column += len;

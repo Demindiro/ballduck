@@ -1,5 +1,5 @@
 fn main()
-	for _ in 10_000_000
+	for _ in 20_000_000
 		#args(1, 2)
 		#empty()
 		length(0.5, 0.7)

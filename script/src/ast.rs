@@ -24,43 +24,63 @@ pub(crate) type Lines<'src> = Vec<Statement<'src>>;
 #[derive(Debug)]
 pub(crate) enum Statement<'src> {
 	Declare {
+		line: u32,
+		column: u32,
 		var: &'src str,
 	},
 	Assign {
+		line: u32,
+		column: u32,
 		var: &'src str,
 		assign_op: AssignOp,
 		expr: Expression<'src>,
 	},
 	AssignIndex {
+		line: u32,
+		column: u32,
 		var: &'src str,
 		index: Expression<'src>,
 		assign_op: AssignOp,
 		expr: Expression<'src>,
 	},
 	Expression {
+		line: u32,
+		column: u32,
 		expr: Expression<'src>,
 	},
 	For {
+		line: u32,
+		column: u32,
 		var: &'src str,
 		expr: Expression<'src>,
 		lines: Lines<'src>,
 	},
 	While {
+		line: u32,
+		column: u32,
 		expr: Expression<'src>,
 		lines: Lines<'src>,
 	},
 	If {
+		line: u32,
+		column: u32,
 		expr: Expression<'src>,
 		lines: Lines<'src>,
 		else_lines: Option<Lines<'src>>,
 	},
 	Return {
+		line: u32,
+		column: u32,
 		expr: Option<Expression<'src>>,
 	},
 	Continue {
+		line: u32,
+		column: u32,
 		levels: u8,
 	},
 	Break {
+		line: u32,
+		column: u32,
 		levels: u8,
 	},
 }
@@ -76,19 +96,35 @@ pub(crate) enum Atom<'src> {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Expression<'src> {
-	Atom(Atom<'src>),
+	Atom {
+		line: u32,
+		column: u32,
+		atom: Atom<'src>,
+	},
 	Operation {
+		line: u32,
+		column: u32,
 		op: Op,
 		left: Box<Expression<'src>>,
 		right: Box<Expression<'src>>,
 	},
 	Function {
+		line: u32,
+		column: u32,
 		expr: Option<Box<Expression<'src>>>,
 		name: &'src str,
 		arguments: Vec<Expression<'src>>,
 	},
-	Array(Vec<Self>),
-	Dictionary(Vec<(Self, Self)>),
+	Array {
+		line: u32,
+		column: u32,
+		array: Vec<Self>,
+	},
+	Dictionary {
+		line: u32,
+		column: u32,
+		dictionary: Vec<(Self, Self)>,
+	},
 }
 
 #[derive(Debug)]
@@ -206,43 +242,53 @@ impl<'src> Function<'src> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
-				Some(Token::Name(name)) => match tokens.next() {
-					Some(Token::BracketRoundOpen) => {
-						tokens.prev();
-						tokens.prev();
-						let expr = Expression::parse(tokens)?;
-						lines.push(Statement::Expression { expr });
-					}
-					Some(Token::BracketSquareOpen) => {
-						let expr = Expression::Atom(Atom::Name(name));
-						let expr = Expression::parse_index_op(expr, tokens)?;
-						if let Some(Token::Assign(assign_op)) = tokens.next() {
-							if let Expression::Operation { right, .. } = expr {
-								lines.push(Statement::AssignIndex {
-									var: name,
-									index: *right,
-									assign_op,
-									expr: Expression::parse(tokens)?,
-								});
-							} else {
-								unreachable!();
-							}
-						} else {
+				Some(Token::Name(name)) => {
+					let (line, column) = tokens.position();
+					match tokens.next() {
+						Some(Token::BracketRoundOpen) => {
 							tokens.prev();
-							lines.push(Statement::Expression { expr });
+							tokens.prev();
+							let (line, column) = tokens.position();
+							let expr = Expression::parse(tokens)?;
+							lines.push(Statement::Expression { expr, line, column });
 						}
-					}
-					Some(Token::Assign(op)) => match op {
-						AssignOp::None => lines.push(Statement::Assign {
-							var: name,
-							assign_op: op,
-							expr: Expression::parse(tokens)?,
-						}),
+						Some(Token::BracketSquareOpen) => {
+							let expr = Expression::new_name(name, tokens);
+							let (line, column) = tokens.position();
+							let expr = Expression::parse_index_op(expr, tokens)?;
+							if let Some(Token::Assign(assign_op)) = tokens.next() {
+								if let Expression::Operation { right, .. } = expr {
+									lines.push(Statement::AssignIndex {
+										var: name,
+										index: *right,
+										assign_op,
+										expr: Expression::parse(tokens)?,
+										line,
+										column,
+									});
+								} else {
+									unreachable!();
+								}
+							} else {
+								tokens.prev();
+								lines.push(Statement::Expression { expr, line, column });
+							}
+						}
+						Some(Token::Assign(op)) => match op {
+							AssignOp::None => lines.push(Statement::Assign {
+								var: name,
+								assign_op: op,
+								expr: Expression::parse(tokens)?,
+								line,
+								column,
+							}),
+							e => todo!("{:?} {:?}", e, tokens.position()),
+						},
 						e => todo!("{:?} {:?}", e, tokens.position()),
-					},
-					e => todo!("{:?} {:?}", e, tokens.position()),
-				},
+					}
+				}
 				Some(Token::For) => {
+					let (line, column) = tokens.position();
 					let var = match tokens.next() {
 						Some(Token::Name(n)) => n,
 						Some(tk) => err!(UnexpectedToken, tk, tokens),
@@ -257,32 +303,44 @@ impl<'src> Function<'src> {
 						var,
 						expr,
 						lines: blk,
+						line,
+						column,
 					});
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
 				}
 				Some(Token::While) => {
+					let (line, column) = tokens.position();
 					let expr = Expression::parse(tokens)?;
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
-					lines.push(Statement::While { expr, lines: blk });
+					lines.push(Statement::While {
+						expr,
+						lines: blk,
+						line,
+						column,
+					});
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
 				}
 				Some(Token::If) => {
+					let (line, column) = tokens.position();
 					let expr = Expression::parse(tokens)?;
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
 					lines.push(Statement::If {
 						expr,
 						lines: blk,
 						else_lines: None,
+						line,
+						column,
 					});
 					if indent < expected_indent {
 						return Ok((lines, indent));
 					}
 					let mut prev_blk = &mut lines;
 					while let Some(tk) = tokens.next() {
+						let (line, column) = tokens.position();
 						if tk == Token::Elif {
 							let expr = Expression::parse(tokens)?;
 							let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
@@ -290,6 +348,8 @@ impl<'src> Function<'src> {
 								expr,
 								lines: blk,
 								else_lines: None,
+								line,
+								column,
 							}]);
 							prev_blk = match prev_blk.last_mut().unwrap() {
 								Statement::If { else_lines, .. } => {
@@ -318,29 +378,34 @@ impl<'src> Function<'src> {
 				}
 				Some(Token::Pass) => (),
 				Some(Token::Return) => {
+					let (line, column) = tokens.position();
 					let expr = if let Some(_) = tokens.next() {
 						tokens.prev();
 						Some(Expression::parse(tokens)?)
 					} else {
 						None
 					};
-					lines.push(Statement::Return { expr });
+					lines.push(Statement::Return { expr, line, column });
 				}
 				Some(Token::Var) => {
+					let (line, column) = tokens.position();
 					let var = match tokens.next() {
 						Some(Token::Name(n)) => n,
 						Some(tk) => err!(UnexpectedToken, tk, tokens),
 						None => err!(UnexpectedEOF, tokens),
 					};
-					lines.push(Statement::Declare { var });
+					lines.push(Statement::Declare { var, line, column });
 					match tokens.next() {
 						Some(Token::Assign(assign_op)) => match assign_op {
 							AssignOp::None => {
+								let (line, column) = tokens.position();
 								let expr = Expression::parse(tokens)?;
 								lines.push(Statement::Assign {
 									var,
 									assign_op,
 									expr,
+									line,
+									column,
 								});
 							}
 							op => todo!("{:?}", op),
@@ -353,6 +418,7 @@ impl<'src> Function<'src> {
 					}
 				}
 				Some(tk) if tk == Token::Continue || tk == Token::Break => {
+					let (line, column) = tokens.position();
 					let levels = match tokens.next() {
 						Some(Token::Number(num)) => match parse_number(num) {
 							Ok(Atom::Integer(num)) => {
@@ -370,8 +436,16 @@ impl<'src> Function<'src> {
 						tk => err!(UnexpectedToken, tk, tokens),
 					};
 					match tk {
-						Token::Continue => lines.push(Statement::Continue { levels }),
-						Token::Break => lines.push(Statement::Break { levels }),
+						Token::Continue => lines.push(Statement::Continue {
+							levels,
+							line,
+							column,
+						}),
+						Token::Break => lines.push(Statement::Break {
+							levels,
+							line,
+							column,
+						}),
 						_ => unreachable!(),
 					}
 				}
@@ -387,26 +461,6 @@ impl<'src> Function<'src> {
 
 impl<'src> Expression<'src> {
 	fn parse(tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
-		let expr_op = |left, op, right| Expression::Operation {
-			left: Box::new(left),
-			op,
-			right: Box::new(right),
-		};
-		let expr_fn = |expr: Option<_>, name, arguments| Expression::Function {
-			expr: expr.map(Box::new),
-			name,
-			arguments,
-		};
-		let expr_num = |n, tokens: &mut TokenStream, sl| {
-			if let Ok(n) = parse_number(n) {
-				Ok(Expression::Atom(n))
-			} else {
-				let (l, c) = tokens.position();
-				Error::new(ErrorType::NotANumber, l, c, sl)
-			}
-		};
-		let expr_name = |n| Expression::Atom(Atom::Name(n));
-
 		let lhs = match tokens.next() {
 			Some(Token::BracketRoundOpen) => {
 				let e = Self::parse(tokens)?;
@@ -415,28 +469,40 @@ impl<'src> Expression<'src> {
 				}
 				e
 			}
-			Some(Token::String(s)) => Self::Atom(Atom::String(s)),
-			Some(Token::Number(n)) => expr_num(n, tokens, line!())?,
-			Some(Token::True) => Self::Atom(Atom::Bool(true)),
-			Some(Token::False) => Self::Atom(Atom::Bool(false)),
+			Some(Token::String(s)) => Self::new_str(s, tokens),
+			Some(Token::Number(n)) => Self::new_num(n, tokens)?,
+			Some(tk) if tk == Token::True || tk == Token::False => Self::new_bool(tk, tokens),
 			Some(Token::Name(name)) => match tokens.next() {
-				Some(Token::BracketRoundOpen) => expr_fn(
+				Some(Token::BracketRoundOpen) => Self::new_fn(
 					None,
 					name,
 					Self::parse_expr_list(tokens, Token::BracketRoundClose)?,
+					tokens,
 				),
-				Some(Token::BracketSquareOpen) => Self::parse_index_op(expr_name(name), tokens)?,
+				Some(Token::BracketSquareOpen) => {
+					Self::parse_index_op(Self::new_name(name, tokens), tokens)?
+				}
 				Some(_) => {
 					tokens.prev();
-					expr_name(name)
+					Self::new_name(name, tokens)
 				}
 				e => todo!("{:?}", e),
 			},
 			Some(Token::BracketSquareOpen) => {
-				Self::Array(Self::parse_expr_list(tokens, Token::BracketSquareClose)?)
+				let pos = tokens.position();
+				Self::Array {
+					array: Self::parse_expr_list(tokens, Token::BracketSquareClose)?,
+					line: pos.0,
+					column: pos.1,
+				}
 			}
 			Some(Token::BracketCurlyOpen) => {
-				Self::Dictionary(Self::parse_expr_map(tokens, Token::BracketCurlyClose)?)
+				let pos = tokens.position();
+				Self::Dictionary {
+					dictionary: Self::parse_expr_map(tokens, Token::BracketCurlyClose)?,
+					line: pos.0,
+					column: pos.1,
+				}
 			}
 			e => todo!("{:?}", e),
 		};
@@ -446,57 +512,67 @@ impl<'src> Expression<'src> {
 				Token::Op(opl) => match tokens.next() {
 					Some(Token::Name(mid)) => {
 						let og_mid = mid;
-						let mid = expr_name(mid);
+						let mid = Self::new_name(mid, tokens);
 						match tokens.next() {
-							Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
+							Some(Token::Op(opr)) => {
+								Self::parse_tri_op_start(lhs, opl, mid, opr, tokens)
+							}
 							Some(Token::BracketRoundOpen) => {
 								let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
 								match opl {
-									Op::Access => Ok(expr_fn(Some(lhs), og_mid, args)),
-									op => Ok(expr_op(lhs, op, expr_fn(None, og_mid, args))),
+									Op::Access => Ok(Self::new_fn(Some(lhs), og_mid, args, tokens)),
+									op => Ok(Self::new_op(
+										lhs,
+										op,
+										Self::new_fn(None, og_mid, args, tokens),
+										tokens,
+									)),
 								}
 							}
 							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 								tokens.prev();
-								Ok(expr_op(lhs, opl, mid))
+								Ok(Self::new_op(lhs, opl, mid, tokens))
 							}
 							Some(Token::BracketSquareOpen) => {
 								let mid = Self::parse_index_op(mid, tokens)?;
 								match tokens.next() {
-									Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
+									Some(Token::Op(opr)) => {
+										Self::parse_tri_op_start(lhs, opl, mid, opr, tokens)
+									}
 									Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 										tokens.prev();
-										Ok(expr_op(lhs, opl, mid))
+										Ok(Self::new_op(lhs, opl, mid, tokens))
 									}
-									None => Ok(expr_op(lhs, opl, mid)),
+									None => Ok(Self::new_op(lhs, opl, mid, tokens)),
 									e => todo!("{:?}", e),
 								}
 							}
-							None => Ok(expr_op(lhs, opl, mid)),
+							None => Ok(Self::new_op(lhs, opl, mid, tokens)),
 							e => todo!("{:?}", e),
 						}
 					}
 					Some(Token::Number(mid)) => {
-						let mid = expr_num(mid, tokens, line!())?;
+						let mid = Self::new_num(mid, tokens)?;
 						match tokens.next() {
-							Some(Token::Op(opr)) => Self::parse_tri_op_start(lhs, opl, mid, opr, tokens),
+							Some(Token::Op(opr)) => {
+								Self::parse_tri_op_start(lhs, opl, mid, opr, tokens)
+							}
 							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 								tokens.prev();
-								Ok(expr_op(lhs, opl, mid))
+								Ok(Self::new_op(lhs, opl, mid, tokens))
 							}
-							None => Ok(expr_op(lhs, opl, mid)),
+							None => Ok(Self::new_op(lhs, opl, mid, tokens)),
 							e => todo!("{:?}", e),
 						}
-					},
+					}
 					Some(mid) if mid == Token::True || mid == Token::False => {
-						let mid =
-							Self::Atom(Atom::Bool(if mid == Token::True { true } else { false }));
+						let mid = Self::new_bool(mid, tokens);
 						match tokens.next() {
 							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
 								tokens.prev();
-								Ok(expr_op(lhs, opl, mid))
+								Ok(Self::new_op(lhs, opl, mid, tokens))
 							}
-							None => Ok(expr_op(lhs, opl, mid)),
+							None => Ok(Self::new_op(lhs, opl, mid, tokens)),
 							e => todo!("{:?}", e),
 						}
 					}
@@ -518,9 +594,15 @@ impl<'src> Expression<'src> {
 		}
 	}
 
-	fn parse_tri_op_start(lhs: Self, opl: Op, mid: Self, opr: Op, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+	fn parse_tri_op_start(
+		lhs: Self,
+		opl: Op,
+		mid: Self,
+		opr: Op,
+		tokens: &mut TokenStream<'src>,
+	) -> Result<Self, Error> {
 		let rhs = match tokens.next() {
-			Some(Token::Name(rhs)) => Self::new_name(rhs),
+			Some(Token::Name(rhs)) => Self::new_name(rhs, tokens),
 			Some(Token::Number(rhs)) => Self::new_num(rhs, tokens)?,
 			e => todo!("{:?}", e),
 		};
@@ -538,34 +620,82 @@ impl<'src> Expression<'src> {
 		let (left, op, right) = if op_left >= op_right {
 			tokens.prev();
 			let right = Self::parse(tokens)?;
-			let left = Self::new_op(left, op_left, mid);
+			let left = Self::new_op(left, op_left, mid, tokens);
 			(left, op_right, right)
 		} else {
-			let right = Self::new_op(mid, op_right, right);
+			let right = Self::new_op(mid, op_right, right, tokens);
 			(left, op_left, right)
 		};
-		Ok(Self::new_op(left, op, right))
+		Ok(Self::new_op(left, op, right, tokens))
 	}
 
-	fn new_op(left: Self, op: Op, right: Self) -> Self {
+	fn new_op(left: Self, op: Op, right: Self, tokens: &TokenStream<'src>) -> Self {
+		let pos = tokens.position();
 		Self::Operation {
 			left: Box::new(left),
 			op,
 			right: Box::new(right),
+			line: pos.0,
+			column: pos.1,
 		}
 	}
 
-	fn new_name(n: &'src str) -> Self {
-		Self::Atom(Atom::Name(n))
+	fn new_name(n: &'src str, tokens: &TokenStream<'src>) -> Self {
+		let pos = tokens.position();
+		Self::Atom {
+			atom: Atom::Name(n),
+			line: pos.0,
+			column: pos.1,
+		}
 	}
 
 	fn new_num(n: &'src str, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		let (line, column) = tokens.position();
 		parse_number(n)
-			.map(|n| Expression::Atom(n))
+			.map(|atom| Self::Atom { atom, line, column })
 			.or_else(|_| {
 				let (l, c) = tokens.position();
 				Error::new(ErrorType::NotANumber, l, c, line!())
 			})
+	}
+
+	fn new_bool(tk: Token, tokens: &mut TokenStream<'src>) -> Self {
+		let val = match tk {
+			Token::True => true,
+			Token::False => false,
+			_ => unreachable!(),
+		};
+		let pos = tokens.position();
+		Self::Atom {
+			atom: Atom::Bool(val),
+			line: pos.0,
+			column: pos.1,
+		}
+	}
+
+	fn new_str(n: &'src str, tokens: &TokenStream<'src>) -> Self {
+		let pos = tokens.position();
+		Self::Atom {
+			atom: Atom::String(n),
+			line: pos.0,
+			column: pos.1,
+		}
+	}
+
+	fn new_fn(
+		expr: Option<Self>,
+		name: &'src str,
+		arguments: Vec<Self>,
+		tokens: &TokenStream<'src>,
+	) -> Self {
+		let pos = tokens.position();
+		Self::Function {
+			expr: expr.map(Box::new),
+			name,
+			arguments,
+			line: pos.0,
+			column: pos.1,
+		}
 	}
 
 	fn parse_expr_list(
@@ -650,10 +780,13 @@ impl<'src> Expression<'src> {
 	/// as `a[0] * a[1]` that are hard to parse in one go using `parse_tri_op` or the like.
 	/// The preceding '[' is meant to be consumed before calling this function.
 	fn parse_index_op(var: Self, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		let pos = tokens.position();
 		let expr = Self::Operation {
 			op: Op::Index,
 			left: Box::new(var),
 			right: Box::new(Self::parse(tokens)?),
+			line: pos.0,
+			column: pos.1,
 		};
 		if tokens.next() != Some(Token::BracketSquareClose) {
 			err!(ExpectedToken, Token::BracketSquareClose, tokens);

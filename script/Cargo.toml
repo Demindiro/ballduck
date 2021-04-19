@@ -14,7 +14,7 @@ name = "ballscript"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ballscript"
+name = "bs"
 path = "src/bin.rs"
 
 [features]

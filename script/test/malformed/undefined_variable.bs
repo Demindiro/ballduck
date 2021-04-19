@@ -1,0 +1,6 @@
+fn main()
+	var x
+	var y
+	z = x * y
+
+

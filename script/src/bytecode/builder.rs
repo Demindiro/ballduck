@@ -12,7 +12,7 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::rc::Rc;
 use unwrap_none::UnwrapNone;
 
-pub(crate) struct ByteCodeBuilder<'e, 's, V>
+pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
 where
 	V: VariantType,
 {
@@ -34,13 +34,33 @@ struct LoopContext {
 	breaks: Vec<u32>,
 }
 
-#[derive(Debug)]
-pub enum ByteCodeError {
-	DuplicateParameter,
-	DuplicateVar,
-	UndefinedVariable,
-	UnexpectedBreak,
-	UnexpectedContinue,
+pub struct ByteCodeError<'a> {
+	pub line: u32,
+	pub column: u32,
+	error: ByteCodeErrorType<'a>,
+}
+
+pub enum ByteCodeErrorType<'a> {
+	DuplicateParameter(&'a str),
+	DuplicateVariable(&'a str),
+	UndefinedVariable(&'a str),
+	UnexpectedBreak(),
+	UnexpectedContinue(),
+}
+
+macro_rules! err {
+	($line:expr, $column:expr, $error:ident) => {
+		err!($line, $column, $error, )
+	};
+	($line:expr, $column:expr, $error:ident, $($arg:expr)*) => {
+		return Err(ByteCodeError::new(*$line, *$column, ByteCodeErrorType::$error($($arg,)*)));
+	};
+	(lazy $line:expr, $column:expr, $error:ident) => {
+		err!(lazy $line, $column, $error, )
+	};
+	(lazy $line:expr, $column:expr, $error:ident, $($arg:expr)*) => {
+		|| { ByteCodeError::new(*$line, *$column, ByteCodeErrorType::$error($($arg,)*)) }
+	};
 }
 
 /// A type used to prevent duplication of constant values. It is capable of
@@ -53,16 +73,16 @@ enum Constant {
 	Str(Rc<str>),
 }
 
-impl<'e, 's, V> ByteCodeBuilder<'e, 's, V>
+impl<'e, 's: 'e, V> ByteCodeBuilder<'e, 's, V>
 where
 	V: VariantType,
 {
 	pub(crate) fn parse(
-		function: Function,
-		methods: &'e FxHashMap<&'e str, ()>,
+		function: Function<'s>,
+		methods: &'e FxHashMap<&'s str, ()>,
 		locals: &'e FxHashMap<Rc<str>, u16>,
 		string_map: &'e mut FxHashSet<Rc<str>>,
-	) -> Result<ByteCode<V>, ByteCodeError> {
+	) -> Result<ByteCode<V>, ByteCodeError<'s>> {
 		let mut builder = Self {
 			instr: Vec::new(),
 			vars: HashMap::with_hasher(Default::default()),
@@ -78,7 +98,8 @@ where
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
-				return Err(ByteCodeError::DuplicateParameter);
+				let (line, column) = (&0, &0);
+				err!(line, column, DuplicateParameter, p);
 			}
 		}
 		builder.parse_block(&function.lines)?;
@@ -143,14 +164,16 @@ where
 		})
 	}
 
-	fn parse_block(&mut self, lines: &Lines<'s>) -> Result<(), ByteCodeError> {
+	fn parse_block(&mut self, lines: &Lines<'s>) -> Result<(), ByteCodeError<'s>> {
 		let mut frame_vars = Vec::new();
 		for line in lines {
 			match line {
-				Statement::Expression { expr } => {
+				Statement::Expression { expr, .. } => {
 					self.parse_expression(None, expr)?;
 				}
-				Statement::For { var, expr, lines } => {
+				Statement::For {
+					var, expr, lines, ..
+				} => {
 					let og_cvc = self.curr_var_count;
 
 					// Parse expression
@@ -206,7 +229,7 @@ where
 
 					self.curr_var_count = og_cvc;
 				}
-				Statement::While { expr, lines } => {
+				Statement::While { expr, lines, .. } => {
 					let og_cvc = self.curr_var_count;
 
 					// Insert `Jmp` to the expr evaluation
@@ -263,6 +286,7 @@ where
 					expr,
 					lines,
 					else_lines,
+					..
 				} => {
 					// If
 					let expr = self.parse_expression(Some(self.curr_var_count), expr)?;
@@ -296,7 +320,7 @@ where
 						}
 					}
 				}
-				Statement::Return { expr } => {
+				Statement::Return { expr, .. } => {
 					if let Some(expr) = expr {
 						let r = self.parse_expression(Some(0), expr)?.unwrap_or(0);
 						self.instr.push(Instruction::RetSome(r));
@@ -308,6 +332,8 @@ where
 					var,
 					assign_op,
 					expr,
+					line,
+					column,
 				} => {
 					assert_eq!(*assign_op, AssignOp::None, "TODO handle assign ops");
 					if let Some(&reg) = self.vars.get(var) {
@@ -329,17 +355,16 @@ where
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
 						self.curr_var_count = og_cvc;
 					} else {
-						dbg!(var);
-						return Err(ByteCodeError::UndefinedVariable);
+						err!(line, column, UndefinedVariable, var);
 					}
 				}
-				Statement::Declare { var } => {
+				Statement::Declare { var, line, column } => {
 					if self.vars.insert(var, self.curr_var_count).is_none() {
 						self.curr_var_count += 1;
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
 						frame_vars.push(var);
 					} else {
-						return Err(ByteCodeError::DuplicateVar);
+						err!(line, column, DuplicateVariable, var);
 					}
 				}
 				Statement::AssignIndex {
@@ -347,6 +372,8 @@ where
 					index,
 					assign_op,
 					expr,
+					line,
+					column,
 				} => {
 					assert_eq!(*assign_op, AssignOp::None, "TODO handle assign ops");
 					let og_cvc = self.curr_var_count;
@@ -377,29 +404,36 @@ where
 						self.min_var_count = self.min_var_count.max(self.curr_var_count);
 						reg
 					} else {
-						dbg!(var);
-						return Err(ByteCodeError::UndefinedVariable);
+						err!(line, column, UndefinedVariable, var);
 					};
 
 					self.instr
 						.push(Instruction::SetIndex(expr_reg, var, index_reg));
 					self.curr_var_count = og_cvc;
 				}
-				Statement::Continue { levels } => {
+				Statement::Continue {
+					levels,
+					line,
+					column,
+				} => {
 					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
 					let c = self
 						.loops
 						.get_mut(i)
-						.ok_or(ByteCodeError::UnexpectedContinue)?;
+						.ok_or_else(err!(lazy line, column, UnexpectedContinue))?;
 					c.continues.push(self.instr.len() as u32);
 					self.instr.push(Instruction::Jmp(u32::MAX));
 				}
-				Statement::Break { levels } => {
+				Statement::Break {
+					levels,
+					line,
+					column,
+				} => {
 					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
 					let c = self
 						.loops
 						.get_mut(i)
-						.ok_or(ByteCodeError::UnexpectedBreak)?;
+						.ok_or_else(err!(lazy line, column, UnexpectedBreak))?;
 					c.breaks.push(self.instr.len() as u32);
 					self.instr.push(Instruction::Jmp(u32::MAX));
 				}
@@ -416,10 +450,12 @@ where
 	fn parse_expression(
 		&mut self,
 		store: Option<u16>,
-		expr: &Expression,
-	) -> Result<Option<u16>, ByteCodeError> {
+		expr: &Expression<'s>,
+	) -> Result<Option<u16>, ByteCodeError<'s>> {
 		match expr {
-			Expression::Operation { left, op, right } => {
+			Expression::Operation {
+				left, op, right, ..
+			} => {
 				let store = store.expect("TODO: handle operations without store location");
 				let og_cvc = self.curr_var_count;
 				let (r_left, r_right) = (self.curr_var_count, self.curr_var_count + 1);
@@ -463,7 +499,7 @@ where
 				self.curr_var_count = og_cvc;
 				Ok(None)
 			}
-			Expression::Atom(a) => match *a {
+			Expression::Atom { atom, line, column } => match *atom {
 				Atom::Name(name) => {
 					if let Some(&reg) = self.vars.get(name) {
 						Ok(Some(reg))
@@ -472,8 +508,7 @@ where
 						self.instr.push(Instruction::Load(store, local));
 						Ok(None)
 					} else {
-						dbg!(name);
-						Err(ByteCodeError::UndefinedVariable)
+						err!(line, column, UndefinedVariable, name)
 					}
 				}
 				Atom::Real(r) => Ok(Some(self.add_const(V::new_real(r)))),
@@ -488,6 +523,7 @@ where
 				expr,
 				name,
 				arguments,
+				..
 			} => {
 				let og_cvc = self.curr_var_count;
 				let expr = if let Some(expr) = expr {
@@ -526,7 +562,7 @@ where
 				self.curr_var_count = og_cvc;
 				Ok(None)
 			}
-			Expression::Array(array) => {
+			Expression::Array { array, .. } => {
 				let og_cvc = self.curr_var_count;
 				let array_reg = self.curr_var_count;
 				self.curr_var_count += 1;
@@ -548,13 +584,13 @@ where
 				self.curr_var_count = og_cvc;
 				Ok(Some(array_reg))
 			}
-			Expression::Dictionary(dict) => {
+			Expression::Dictionary { dictionary, .. } => {
 				let og_cvc = self.curr_var_count;
 				let dict_reg = self.curr_var_count;
 				self.curr_var_count += 1;
 				self.instr
-					.push(Instruction::NewDictionary(dict_reg, dict.len()));
-				for (key_expr, val_expr) in dict.iter() {
+					.push(Instruction::NewDictionary(dict_reg, dictionary.len()));
+				for (key_expr, val_expr) in dictionary.iter() {
 					let (k, v) = (self.curr_var_count, self.curr_var_count + 1);
 					self.curr_var_count += 2;
 					let k = if let Some(e) = self.parse_expression(Some(k), key_expr)? {
@@ -672,3 +708,32 @@ impl PartialEq for Constant {
 }
 
 impl Eq for Constant {}
+
+impl<'a> ByteCodeError<'a> {
+	fn new(line: u32, column: u32, error: ByteCodeErrorType<'a>) -> Self {
+		Self {
+			line,
+			column,
+			error,
+		}
+	}
+}
+
+impl fmt::Display for ByteCodeError<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use fmt::Write;
+		let mut w = |s, v| {
+			f.write_str(s)?;
+			f.write_str(" '")?;
+			f.write_str(v)?;
+			f.write_char('\'')
+		};
+		match &self.error {
+			ByteCodeErrorType::UndefinedVariable(v) => w("Undefined variable", v),
+			ByteCodeErrorType::DuplicateVariable(v) => w("Duplicate variable", v),
+			ByteCodeErrorType::DuplicateParameter(v) => w("Duplicate parameter", v),
+			ByteCodeErrorType::UnexpectedBreak() => w("Unexpected 'break'", ""),
+			ByteCodeErrorType::UnexpectedContinue() => w("Unexpected 'continue'", ""),
+		}
+	}
+}
