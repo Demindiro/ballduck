@@ -18,6 +18,7 @@ pub fn main() {
 		match fs::read_to_string(&file) {
 			Ok(source) => match ballscript::parse(&source, &mut string_map) {
 				Ok(script) => {
+					dbg!(&script);
 					let script = script.instance();
 					match script.call("main", &[], &env) {
 						Ok(r) => match r {

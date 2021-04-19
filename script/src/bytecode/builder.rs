@@ -441,7 +441,6 @@ where
 		}
 		self.min_var_count = self.min_var_count.max(self.vars.len() as u16);
 		for fv in frame_vars {
-			dbg!(fv);
 			self.vars.remove(fv).unwrap();
 		}
 		Ok(())

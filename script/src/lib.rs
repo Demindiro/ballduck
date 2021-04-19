@@ -38,6 +38,7 @@ pub struct ParseError<'a> {
 
 enum ParseErrorType<'a> {
 	DuplicateLocal(&'a str),
+	Ast(ast::Error),
 	ByteCode(ByteCodeError<'a>),
 }
 
@@ -59,6 +60,10 @@ impl<'a> ParseError<'a> {
 			ParseErrorType::ByteCode(error),
 		)
 	}
+
+	fn new_ast(source: &'a str, error: ast::Error) -> Self {
+		Self::new(source, error.line, error.column, ParseErrorType::Ast(error))
+	}
 }
 
 pub fn parse<'a, 'b: 'a, V>(
@@ -69,7 +74,7 @@ where
 	V: VariantType,
 {
 	let tks = TokenStream::parse(source).unwrap();
-	let ast = ast::Script::parse(tks).unwrap();
+	let ast = ast::Script::parse(tks).map_err(|e| ParseError::new_ast(source, e))?;
 
 	let locals = {
 		let locals = ast.variables;
@@ -115,6 +120,9 @@ impl fmt::Display for ParseError<'_> {
 				f.write_char('\'')?;
 			}
 			ParseErrorType::ByteCode(e) => {
+				e.fmt(f)?;
+			}
+			ParseErrorType::Ast(e) => {
 				e.fmt(f)?;
 			}
 		}
