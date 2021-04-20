@@ -322,7 +322,7 @@ impl VariantType for Variant {
 			Variant::None => Err(CallError::IsEmpty),
 			&Variant::Integer(i) => {
 				if i < 0 {
-					Ok(Box::new((-i + 1..=0).rev().map(|i| Variant::Integer(i))))
+					Ok(Box::new((i + 1..=0).rev().map(|i| Variant::Integer(i))))
 				} else {
 					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
 				}
