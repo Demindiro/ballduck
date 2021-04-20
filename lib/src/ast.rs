@@ -2,6 +2,8 @@
 //
 // This file is licensed under the MIT license. See LICENSE for details.
 
+#[cfg(not(feature = "std"))]
+use crate::std_types::*;
 use crate::tokenizer::*;
 use core::convert::TryInto;
 use core::fmt;

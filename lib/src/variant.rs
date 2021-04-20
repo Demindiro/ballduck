@@ -2,11 +2,11 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::{CallError, CallResult, Environment, ScriptObject};
-use core::cmp;
-use core::fmt;
+#[cfg(not(feature = "std"))]
+use crate::std_types::*;
+use crate::{CallError, CallResult, Environment, Rc, ScriptObject};
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
-use std::rc::Rc;
+use core::{cmp, fmt};
 
 /// This trait must be implemented on custom Variant types.
 /// A custom variant is useful if you have a type that is common and needs to

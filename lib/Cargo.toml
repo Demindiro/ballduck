@@ -6,8 +6,11 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-rustc-hash = "*"
+rustc-hash = { version = "*", default-features = false }
+#hashbrown = { version = "*", optional = true }
 unwrap_none = "*"
 
 [features]
+default = ["std"]
+std = []
 unsafe-loop = []

@@ -1,20 +1,27 @@
 // Copyright (C) 2021  David Hoppenbrouwers
 //
-// This file is licensed under the MIT license. See script/LICENSE for details.
+// This file is licensed under the MIT license. See LICENSE for details.
 
 //! Arrays and Dictionaries are implemented as ScriptTypes as mixing 16 byte with 8 byte `Rc<T>`s
 //! has a significant impact on `clone` performance.
 //! It may be better to have some sort of custom `Array` type that is unsized, but AFAICT that isn't
 //! possible (yet?).
 
+use crate::std_types::hash_map;
+use crate::Rc;
 use crate::{CallError, CallResult, Environment, ScriptType, VariantType};
 use core::cell::{Ref, RefCell};
 use core::{fmt, mem};
-#[cfg(feature = "fast-dictionary")]
-use rustc_hash::FxHashMap;
-#[cfg(not(feature = "fast-dictionary"))]
-use std::collections::HashMap;
-use std::rc::Rc;
+
+#[cfg(feature = "std")]
+mod dict {
+	#[cfg(feature = "fast-dictionary")]
+	pub use crate::std_types::FxHashMap as HashMap;
+	#[cfg(not(feature = "fast-dictionary"))]
+	pub use std::collections::HashMap;
+}
+#[cfg(feature = "std")]
+use dict::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct Array<V>(Rc<RefCell<Vec<V>>>)
@@ -22,12 +29,7 @@ where
 	V: VariantType;
 
 #[derive(Clone, Debug)]
-#[cfg(not(feature = "fast-dictionary"))]
 pub struct Dictionary<V>(Rc<RefCell<HashMap<VariantOrd, V>>>)
-where
-	V: VariantType;
-#[cfg(feature = "fast-dictionary")]
-pub struct Dictionary<V>(Rc<RefCell<FxHashMap<VariantOrd, V>>>)
 where
 	V: VariantType;
 
@@ -56,7 +58,7 @@ struct DictionaryIter<'a, V>
 where
 	V: VariantType,
 {
-	iter: std::collections::hash_map::Keys<'a, VariantOrd, V>,
+	iter: hash_map::Keys<'a, VariantOrd, V>,
 	_borrow: Ref<'a, HashMap<VariantOrd, V>>,
 	_dictionary: Dictionary<V>,
 }

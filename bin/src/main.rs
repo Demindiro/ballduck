@@ -1,11 +1,11 @@
 // Copyright (C) 2021  David Hoppenbrouwers
 //
-// This file is licensed under the MIT license. See script/LICENSE for details.
+// This file is licensed under the MIT license. See LICENSE for details.
 
 use ansi_term::Color;
 use ballscript::{CallError, Environment, ParseError, ScriptType, Variant};
-use rustc_hash::FxHashSet;
 use std::{env, fs, io, process};
+use rustc_hash::FxHashSet;
 
 pub fn main() {
 	let mut args = env::args();

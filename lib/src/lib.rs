@@ -4,6 +4,7 @@
 
 #![allow(unstable_name_collisions)] // `unwrap_none` and `expect_none` are removed
 #![feature(box_patterns)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use unwrap_none::UnwrapNone;
 
@@ -26,8 +27,34 @@ use script::Script;
 use tokenizer::TokenStream;
 
 use core::fmt;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::rc::Rc;
+
+#[cfg(feature = "std")]
+pub(crate) mod std_types {
+	pub use rustc_hash::{FxHashMap, FxHashSet};
+	pub use std::collections::{hash_map, HashMap, HashSet};
+	pub use std::rc::Rc;
+	pub use std::sync::Arc;
+}
+
+#[cfg(not(feature = "std"))]
+pub(crate) mod std_types {
+	extern crate alloc;
+
+	pub use alloc::boxed::Box;
+	pub use alloc::format;
+	pub use alloc::rc::Rc;
+	pub use alloc::string::{String, ToString};
+	pub use alloc::sync::Arc;
+	pub use alloc::vec::Vec;
+	pub use hashbrown::{hash_map, HashMap, HashSet};
+
+	use core::hash::BuildHasherDefault;
+	use rustc_hash::FxHasher;
+	pub type FxHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
+	pub type FxHashSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
+}
+
+use std_types::*;
 
 pub struct ParseError<'a> {
 	pub line: u32,

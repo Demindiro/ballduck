@@ -2,10 +2,8 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::{CallError, CallResult, VariantType};
-use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
-use std::rc::Rc;
+use crate::std_types::{FxHashMap, hash_map::Entry};
+use crate::{CallError, CallResult, Rc, VariantType};
 
 #[derive(Default)]
 pub struct Environment<V>

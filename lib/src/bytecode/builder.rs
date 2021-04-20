@@ -4,12 +4,11 @@
 
 use super::*;
 use crate::ast::{Atom, Expression, Function, Lines, Statement};
+use crate::std_types::hash_map::Entry;
+use crate::std_types::*;
 use crate::tokenizer::{AssignOp, Op};
-use crate::VariantType;
+use crate::{Rc, VariantType};
 use core::hash;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::hash_map::{Entry, HashMap};
-use std::rc::Rc;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>

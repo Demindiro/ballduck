@@ -2,6 +2,9 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
+#[cfg(not(feature = "std"))]
+use crate::std_types::*;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Op {
 	Add,

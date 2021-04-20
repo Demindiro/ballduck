@@ -3,13 +3,12 @@
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
 use crate::bytecode::{ByteCode, CallResult, RunError};
+use crate::std_types::*;
+use crate::Rc;
 use crate::{Environment, Tracer, VariantType};
 use core::any::{Any, TypeId};
+use core::cell::RefCell;
 use core::fmt;
-use rustc_hash::FxHashMap;
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
 
 pub struct Class<V, T>(Arc<Script<V, T>>)
 where
@@ -91,7 +90,7 @@ where
 
 	#[inline]
 	fn to_string(&self) -> String {
-		std::any::type_name::<Self>().into()
+		core::any::type_name::<Self>().into()
 	}
 
 	#[inline]

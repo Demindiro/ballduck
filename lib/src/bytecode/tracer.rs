@@ -3,8 +3,8 @@
 // This file is licensed under the MIT license. See LICENSE for details.
 
 use super::{ByteCode, Instruction, RunState};
+use crate::std_types::Rc;
 use crate::VariantType;
-use std::rc::Rc;
 
 /// This trait is used to inspect the execution of bytecode. It can trace every
 /// instruction that is being executed & follow calls.
