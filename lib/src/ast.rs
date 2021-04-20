@@ -24,6 +24,12 @@ pub(crate) struct Function<'src> {
 
 pub(crate) type Lines<'src> = Vec<Statement<'src>>;
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum UnaryOp {
+	Neg,
+	Not,
+}
+
 #[derive(Debug)]
 pub(crate) enum Statement<'src> {
 	Declare {
@@ -115,6 +121,12 @@ pub(crate) enum Expression<'src> {
 		op: Op,
 		left: Box<Expression<'src>>,
 		right: Box<Expression<'src>>,
+	},
+	UnaryOperation {
+		line: u32,
+		column: u32,
+		op: UnaryOp,
+		expr: Box<Expression<'src>>,
 	},
 	Function {
 		line: u32,
@@ -511,6 +523,25 @@ impl<'src> Expression<'src> {
 					dictionary: Self::parse_expr_map(tokens, Token::BracketCurlyClose)?,
 					line: pos.0,
 					column: pos.1,
+				}
+			}
+			Some(Token::Op(op)) => {
+				let (line, column) = tokens.position();
+				let op = match op {
+					Op::Sub => UnaryOp::Neg,
+					Op::Not => UnaryOp::Not,
+					_ => err!(UnexpectedToken, Token::Op(op), tokens),
+				};
+				let expr = match tokens.next() {
+					Some(Token::Name(name)) => Self::new_name(name, tokens),
+					None => err!(UnexpectedEOF, tokens),
+					_ => todo(tokens, line!())?,
+				};
+				Self::UnaryOperation {
+					line,
+					column,
+					op,
+					expr: Box::new(expr),
 				}
 			}
 			_ => todo(tokens, line!())?,

@@ -3,7 +3,7 @@
 // This file is licensed under the MIT license. See LICENSE for details.
 
 use super::*;
-use crate::ast::{Atom, Expression, Function, Lines, Statement};
+use crate::ast::{Atom, Expression, Function, Lines, Statement, UnaryOp};
 use crate::std_types::hash_map::Entry;
 use crate::std_types::*;
 use crate::tokenizer::{AssignOp, Op};
@@ -128,6 +128,8 @@ where
 					| JmpNotIf(a, _)
 					| Iter(_, a, _)
 					| RetSome(a)
+					| Neg(_, a)
+					| Not(_, a)
 					| Store(a, _)
 					| Load(a, _)
 					| Move(_, a) => conv(a),
@@ -531,6 +533,25 @@ where
 					Op::Not | Op::AndThen | Op::OrElse => todo!(),
 					Op::Index => Instruction::GetIndex(store, left, right),
 					Op::Access => panic!("{:?} is not an actual op (bug in AST)", Op::Access),
+				});
+				self.curr_var_count = og_cvc;
+				Ok(None)
+			}
+			Expression::UnaryOperation { expr, op, .. } => {
+				let store = store.expect("TODO: handle operations without store location");
+				let og_cvc = self.curr_var_count;
+				let r_expr = self.curr_var_count;
+				self.curr_var_count += 1;
+				let expr = if let Some(r) = self.parse_expression(Some(r_expr), expr)? {
+					self.curr_var_count -= 1;
+					r
+				} else {
+					r_expr
+				};
+				self.update_min_vars();
+				self.instr.push(match op {
+					UnaryOp::Neg => Instruction::Neg(store, expr),
+					UnaryOp::Not => Instruction::Not(store, expr),
 				});
 				self.curr_var_count = og_cvc;
 				Ok(None)

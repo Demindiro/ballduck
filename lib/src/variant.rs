@@ -55,6 +55,8 @@ where
 	fn bitxor(&self, rhs: &Self) -> CallResult<Self>;
 	fn lhs(&self, rhs: &Self) -> CallResult<Self>;
 	fn rhs(&self, rhs: &Self) -> CallResult<Self>;
+	fn neg(&self) -> CallResult<Self>;
+	fn not(&self) -> CallResult<Self>;
 }
 
 #[derive(Clone)]
@@ -185,6 +187,32 @@ gen_op!(
 	[rhs, lhs]
 	[Integer, Integer] => Integer { rhs >> lhs }
 );
+
+impl core::ops::Neg for &Variant {
+	type Output = CallResult<Variant>;
+
+	fn neg(self) -> Self::Output {
+		use Variant::*;
+		Ok(match self {
+			Integer(i) => Integer(-i),
+			Real(r) => Real(-r),
+			_ => return Err(CallError::IncompatibleType),
+		})
+	}
+}
+
+impl core::ops::Not for &Variant {
+	type Output = CallResult<Variant>;
+
+	fn not(self) -> Self::Output {
+		use Variant::*;
+		Ok(match self {
+			Bool(b) => Bool(!b),
+			Integer(i) => Integer(!i),
+			_ => return Err(CallError::IncompatibleType),
+		})
+	}
+}
 
 impl PartialEq<Self> for Variant {
 	#[inline]
@@ -376,6 +404,12 @@ impl VariantType for Variant {
 	}
 	fn rhs(&self, rhs: &Self) -> CallResult<Self> {
 		self >> rhs
+	}
+	fn neg(&self) -> CallResult<Self> {
+		-self
+	}
+	fn not(&self) -> CallResult<Self> {
+		!self
 	}
 }
 

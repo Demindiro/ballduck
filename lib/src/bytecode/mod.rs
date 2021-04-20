@@ -45,6 +45,8 @@ pub enum Instruction {
 	Xor(u16, u16, u16),
 	Shl(u16, u16, u16),
 	Shr(u16, u16, u16),
+	Not(u16, u16),
+	Neg(u16, u16),
 
 	LessEq(u16, u16, u16),
 	Less(u16, u16, u16),
@@ -123,6 +125,9 @@ macro_rules! reg {
 macro_rules! run_op {
 	($state:ident, $r:ident = $a:ident $op:tt $b:ident) => {
 		reg!(mut $state $r) = (reg!(ref $state $a).$op(reg!(ref $state $b))).map_err(err::call)?;
+	};
+	($state:ident, $r:ident = $a:ident $op:tt) => {
+		reg!(mut $state $r) = reg!(ref $state $a).$op().map_err(err::call)?;
 	};
 }
 
@@ -288,6 +293,8 @@ where
 					Less(r, a, b) => run_cmp!(state, r = a < b),
 					Neq(r, a, b) => run_cmp!(state, r = a != b),
 					Eq(r, a, b) => run_cmp!(state, r = a == b),
+					Neg(r, a) => run_op!(state, r = a neg),
+					Not(r, a) => run_op!(state, r = a not),
 					Store(r, l) => {
 						*locals
 							.get_mut(*l as usize)
@@ -365,6 +372,8 @@ impl Debug for Instruction {
 			Xor(r, a, b) => write!(f, "xor     {}, {}, {}", r, a, b),
 			Shl(r, a, b) => write!(f, "shl     {}, {}, {}", r, a, b),
 			Shr(r, a, b) => write!(f, "shr     {}, {}, {}", r, a, b),
+			Neg(r, a) => write!(f, "neg     {}, {}", r, a),
+			Not(r, a) => write!(f, "not     {}, {}", r, a),
 
 			Eq(r, a, b) => write!(f, "eq      {}, {}, {}", r, a, b),
 			Neq(r, a, b) => write!(f, "neq     {}, {}, {}", r, a, b),
