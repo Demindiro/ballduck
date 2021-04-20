@@ -18,7 +18,7 @@ mod variant;
 
 pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};
 pub use environment::Environment;
-pub use script::{CallError, Class, ScriptObject, ScriptType};
+pub use script::{CallError, Class, ScriptObject, ScriptType, Instance};
 pub use types::{Array, Dictionary};
 pub use variant::{Variant, VariantType};
 
