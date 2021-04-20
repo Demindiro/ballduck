@@ -299,6 +299,18 @@ impl<'src> Function<'src> {
 							line,
 							column,
 						}),
+						Some(Token::Op(op)) => {
+							match op {
+								Op::Access => {
+									tokens.prev();
+									tokens.prev();
+									let (line, column) = tokens.position();
+									let expr = Expression::parse(tokens)?;
+									lines.push(Statement::Expression { expr, line, column });
+								}
+								_ => todo(tokens, line!())?,
+							}
+						}
 						_ => todo(tokens, line!())?,
 					}
 				}
