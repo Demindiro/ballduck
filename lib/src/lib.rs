@@ -24,8 +24,8 @@ pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};
 pub use environment::Environment;
 pub use script::{CallError, Class, Instance, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
-pub use variant::{Variant, VariantType};
 pub use variant::specialized;
+pub use variant::{Variant, VariantType};
 
 use bytecode::{ByteCodeBuilder, ByteCodeError};
 use script::Script;
@@ -132,7 +132,10 @@ where
 	for (i, f) in ast.functions.iter().enumerate() {
 		let i = i as u16;
 		let name = f.name.into();
-		script.function_map.insert(name, i).expect_none("Duplicate function");
+		script
+			.function_map
+			.insert(name, i)
+			.expect_none("Duplicate function");
 	}
 	for f in ast.functions {
 		ByteCodeBuilder::parse(f, &script.function_map, &script.locals, string_map)

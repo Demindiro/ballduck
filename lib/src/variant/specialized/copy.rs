@@ -2,14 +2,13 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-
 #[cfg(not(feature = "std"))]
 use crate::std_types::*;
 use crate::{CallError, CallResult, Environment, Rc, ScriptObject};
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 use core::{cmp, fmt};
 
-use super::{VariantType, gen_op, check_arg_count};
+use super::{check_arg_count, gen_op, VariantType};
 
 #[derive(Clone, Copy)]
 /// This is a special variant type that implements only types that implement Copy.

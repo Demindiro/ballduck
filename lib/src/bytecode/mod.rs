@@ -173,6 +173,35 @@ where
 			return Err(RunError::IncorrectArgumentCount);
 		}
 
+		let vars_len = self.var_count as usize + self.consts.len();
+
+		// Allocating stuff on the stack is much cheaper. However, blindly
+		// allocating a really big array is actually worse so use Vec for
+		// large functions
+		// (gib VLAs pls (/ °-°)/ )
+		let mut stack_vars = [
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+			mem::MaybeUninit::uninit(),
+		];
+		let mut heap_vars = if vars_len > stack_vars.len() {
+			let mut vars = Vec::with_capacity(vars_len);
+			vars.resize_with(vars_len, || mem::MaybeUninit::uninit());
+			Some(vars)
+		} else {
+			None
+		};
+		let vars = if let Some(v) = heap_vars.as_mut() {
+			&mut v[..]
+		} else {
+			&mut stack_vars[..]
+		};
+
 		/*
 		let vars_len = self.var_count as usize + self.consts.len();
 		let mut vars = Vec::with_capacity(vars_len);
@@ -186,9 +215,7 @@ where
 		// The "zero-cost" abstractions turned out to be slower, so there is some
 		// manual work involved now.
 		// Hopefully the safe version will be as fast as this eventually.
-		let vars_len = self.var_count as usize + self.consts.len();
-		let mut vars = Vec::with_capacity(vars_len);
-		vars.resize_with(vars_len, || mem::MaybeUninit::uninit());
+
 		// Initializes all elements from 0 to args.len()
 		for (i, v) in args
 			.iter()
@@ -215,7 +242,7 @@ where
 		{
 			vars[i + self.var_count as usize] = v;
 		}
-		let vars = &mut vars[..];
+		let vars = &mut vars[..vars_len];
 		// SAFETY: all variables are initialized
 		let vars = unsafe { mem::transmute(vars) };
 
@@ -315,7 +342,9 @@ where
 
 						// Perform call
 						#[cfg(not(feature = "unsafe-loop"))]
-						let r = functions.get(*func as usize).ok_or(RunError::UndefinedFunction)?;
+						let r = functions
+							.get(*func as usize)
+							.ok_or(RunError::UndefinedFunction)?;
 						#[cfg(feature = "unsafe-loop")]
 						let r = unsafe { functions.get_unchecked(*func as usize) };
 						let trace_call = TraceSelfCall::new(tracer, self, *func);

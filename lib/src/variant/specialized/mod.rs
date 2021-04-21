@@ -1,5 +1,5 @@
 mod copy;
 
-use crate::{VariantType, gen_op, check_arg_count};
+use crate::{check_arg_count, gen_op, VariantType};
 
 pub use copy::Variant as CopyVariant;
