@@ -45,6 +45,7 @@ pub enum ByteCodeErrorType<'a> {
 	UndefinedVariable(&'a str),
 	UnexpectedBreak(),
 	UnexpectedContinue(),
+	TooManyRegisters(),
 }
 
 macro_rules! err {
@@ -152,7 +153,22 @@ where
 						conv(a);
 						conv(b);
 					}
-					IterJmp(_, _) | Jmp(_) | RetNone | NewArray(_, _) | NewDictionary(_, _) => (),
+					IterInt {
+						from: a,
+						to: b,
+						step: c,
+						..
+					} => {
+						conv(a);
+						conv(b);
+						conv(c);
+					}
+					IterJmp(_, _)
+					| IterIntJmp(_, _)
+					| Jmp(_)
+					| RetNone
+					| NewArray(_, _)
+					| NewDictionary(_, _) => (),
 				}
 			}
 		}
@@ -175,22 +191,85 @@ where
 					self.parse_expression(None, expr)?;
 				}
 				Statement::For {
-					var, expr, lines, ..
+					var,
+					from,
+					to,
+					step,
+					lines,
+					line,
+					column,
 				} => {
 					let og_cvc = self.curr_var_count;
+					let (l, c) = (*line, *column);
 
-					// Parse expression
-					let (var_reg, iter_reg) = (self.curr_var_count, self.curr_var_count + 1);
-					self.curr_var_count += 2;
-					self.vars.insert(var, var_reg).expect_none(var);
-					let iter_reg = if let Some(r) = self.parse_expression(Some(iter_reg), expr)? {
-						self.curr_var_count -= 1;
+					// Parse `to` expression
+					let iter_reg = self.alloc_reg(l, c)?;
+					let iter_reg = if let Some(r) = self.parse_expression(Some(iter_reg), to)? {
+						self.dealloc_reg();
 						r
 					} else {
 						iter_reg
 					};
-					self.instr
-						.push(Instruction::Iter(var_reg, iter_reg, u32::MAX));
+
+					// Parse `from` and `step` expressions, if any
+					let from_step = if let Some(from) = from {
+						let from_reg = self.alloc_reg(l, c)?;
+						let from = if let Some(r) = self.parse_expression(Some(from_reg), from)? {
+							self.dealloc_reg();
+							r
+						} else {
+							from_reg
+						};
+						let step = if let Some(step) = step {
+							let step_reg = self.alloc_reg(l, c)?;
+							if let Some(r) = self.parse_expression(Some(step_reg), step)? {
+								self.dealloc_reg();
+								r
+							} else {
+								step_reg
+							}
+						} else {
+							self.add_const(V::new_integer(1))
+						};
+						Some((from, step))
+					} else if let Some(step) = step {
+						let from = self.add_const(V::new_integer(0));
+						let step_reg = self.alloc_reg(l, c)?;
+						let step = if let Some(r) = self.parse_expression(Some(step_reg), step)? {
+							self.dealloc_reg();
+							r
+						} else {
+							step_reg
+						};
+						Some((from, step))
+					} else if self
+						.get_const(iter_reg)
+						.and_then(|v| v.as_integer().ok())
+						.is_some()
+					{
+						let from = self.add_const(V::new_integer(0));
+						let step = self.add_const(V::new_integer(1));
+						Some((from, step))
+					} else {
+						None
+					};
+					self.update_min_vars();
+
+					// Insert var and iter instruction
+					let var_reg = self.alloc_reg(l, c)?;
+					self.vars.insert(var, var_reg).expect_none(var);
+					if let Some((from, step)) = from_step {
+						self.instr.push(Instruction::IterInt {
+							reg: var_reg,
+							from,
+							to: iter_reg,
+							step,
+							jmp_ip: u32::MAX,
+						});
+					} else {
+						self.instr
+							.push(Instruction::Iter(var_reg, iter_reg, u32::MAX));
+					};
 					let ic = self.instr.len() - 1;
 					let ip = self.instr.len() as u32;
 
@@ -212,11 +291,20 @@ where
 					}
 
 					// Insert `IterJmp` instruction & update the `Iter` with the end address.
-					self.instr.push(Instruction::IterJmp(var_reg, ip));
-					let ip = self.instr.len() as u32;
-					match self.instr.get_mut(ic) {
-						Some(Instruction::Iter(_, _, ic)) => *ic = ip,
-						_ => unreachable!(),
+					if let None = from_step {
+						self.instr.push(Instruction::IterJmp(var_reg, ip));
+						let ip = self.instr.len() as u32;
+						match self.instr.get_mut(ic) {
+							Some(Instruction::Iter(_, _, ic)) => *ic = ip,
+							_ => unreachable!(),
+						}
+					} else {
+						self.instr.push(Instruction::IterIntJmp(var_reg, ip));
+						let ip = self.instr.len() as u32;
+						match self.instr.get_mut(ic) {
+							Some(Instruction::IterInt { jmp_ip, .. }) => *jmp_ip = ip,
+							_ => unreachable!(),
+						}
 					}
 
 					// Make `break`s jump to right after the `IterJmp` instruction
@@ -621,8 +709,13 @@ where
 			}
 			Expression::Array { array, .. } => {
 				let og_cvc = self.curr_var_count;
-				let array_reg = self.curr_var_count;
-				self.curr_var_count += 1;
+				let (array_reg, ret) = if let Some(r) = store {
+					(r, None)
+				} else {
+					let r = self.curr_var_count;
+					self.curr_var_count += 1;
+					(r, Some(r))
+				};
 				self.instr
 					.push(Instruction::NewArray(array_reg, array.len()));
 				for (i, expr) in array.iter().enumerate() {
@@ -639,12 +732,17 @@ where
 					self.instr.push(Instruction::SetIndex(r, array_reg, i));
 				}
 				self.curr_var_count = og_cvc;
-				Ok(Some(array_reg))
+				Ok(ret)
 			}
 			Expression::Dictionary { dictionary, .. } => {
 				let og_cvc = self.curr_var_count;
-				let dict_reg = self.curr_var_count;
-				self.curr_var_count += 1;
+				let (dict_reg, ret) = if let Some(r) = store {
+					(r, None)
+				} else {
+					let r = self.curr_var_count;
+					self.curr_var_count += 1;
+					(r, Some(r))
+				};
 				self.instr
 					.push(Instruction::NewDictionary(dict_reg, dictionary.len()));
 				for (key_expr, val_expr) in dictionary.iter() {
@@ -666,7 +764,7 @@ where
 					self.instr.push(Instruction::SetIndex(v, dict_reg, k));
 				}
 				self.curr_var_count = og_cvc;
-				Ok(Some(dict_reg))
+				Ok(ret)
 			}
 		}
 	}
@@ -684,6 +782,16 @@ where
 		}
 	}
 
+	fn get_const(&self, reg: u16) -> Option<V> {
+		// TODO add a reverse map
+		for (k, &v) in self.const_map.iter() {
+			if v == reg {
+				return Some(k.clone().as_variant());
+			}
+		}
+		None
+	}
+
 	fn map_string(&mut self, string: &str) -> Rc<str> {
 		if let Some(string) = self.string_map.get(string) {
 			string.clone()
@@ -696,6 +804,22 @@ where
 
 	fn update_min_vars(&mut self) {
 		self.min_var_count = self.min_var_count.max(self.curr_var_count);
+	}
+
+	fn alloc_reg(&mut self, line: u32, column: u32) -> Result<u16, ByteCodeError<'s>> {
+		let r = self.curr_var_count;
+		self.curr_var_count = self.curr_var_count
+			.checked_add(1)
+			.ok_or(ByteCodeError::new(
+				line,
+				column,
+				ByteCodeErrorType::TooManyRegisters(),
+			))?;
+		Ok(r)
+	}
+
+	fn dealloc_reg(&mut self) {
+		self.curr_var_count -= 1;
 	}
 }
 
@@ -791,6 +915,9 @@ impl fmt::Display for ByteCodeError<'_> {
 			ByteCodeErrorType::DuplicateParameter(v) => w("Duplicate parameter", v),
 			ByteCodeErrorType::UnexpectedBreak() => w("Unexpected 'break'", ""),
 			ByteCodeErrorType::UnexpectedContinue() => w("Unexpected 'continue'", ""),
+			&ByteCodeErrorType::TooManyRegisters() => {
+				w("Too many registers allocated (use less variables!)", "")
+			}
 		}
 	}
 }

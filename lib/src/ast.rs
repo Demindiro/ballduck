@@ -66,7 +66,9 @@ pub(crate) enum Statement<'src> {
 		line: u32,
 		column: u32,
 		var: &'src str,
-		expr: Expression<'src>,
+		from: Option<Expression<'src>>,
+		to: Expression<'src>,
+		step: Option<Expression<'src>>,
 		lines: Lines<'src>,
 	},
 	While {
@@ -299,18 +301,16 @@ impl<'src> Function<'src> {
 							line,
 							column,
 						}),
-						Some(Token::Op(op)) => {
-							match op {
-								Op::Access => {
-									tokens.prev();
-									tokens.prev();
-									let (line, column) = tokens.position();
-									let expr = Expression::parse(tokens)?;
-									lines.push(Statement::Expression { expr, line, column });
-								}
-								_ => todo(tokens, line!())?,
+						Some(Token::Op(op)) => match op {
+							Op::Access => {
+								tokens.prev();
+								tokens.prev();
+								let (line, column) = tokens.position();
+								let expr = Expression::parse(tokens)?;
+								lines.push(Statement::Expression { expr, line, column });
 							}
-						}
+							_ => todo(tokens, line!())?,
+						},
 						_ => todo(tokens, line!())?,
 					}
 				}
@@ -325,10 +325,32 @@ impl<'src> Function<'src> {
 						err!(ExpectedToken, Token::In, tokens);
 					}
 					let expr = Expression::parse(tokens)?;
+					let (from, to, step) = match tokens.next() {
+						Some(Token::To) => {
+							let to = Expression::parse(tokens)?;
+							let step = match tokens.next() {
+								Some(Token::Step) => Some(Expression::parse(tokens)?),
+								Some(_) => {
+									tokens.prev();
+									None
+								}
+								None => None,
+							};
+							(Some(expr), to, step)
+						}
+						Some(Token::Step) => (None, expr, Some(Expression::parse(tokens)?)),
+						Some(_) => {
+							tokens.prev();
+							(None, expr, None)
+						}
+						None => (None, expr, None),
+					};
 					let (blk, indent) = Self::parse_block(tokens, expected_indent + 1)?;
 					lines.push(Statement::For {
 						var,
-						expr,
+						from,
+						to,
+						step,
 						lines: blk,
 						line,
 						column,
@@ -546,6 +568,8 @@ impl<'src> Expression<'src> {
 				};
 				let expr = match tokens.next() {
 					Some(Token::Name(name)) => Self::new_name(name, tokens),
+					Some(Token::Number(n)) => Self::new_num(n, tokens)?,
+					Some(Token::String(s)) => Self::new_str(s, tokens),
 					None => err!(UnexpectedEOF, tokens),
 					_ => todo(tokens, line!())?,
 				};
@@ -640,7 +664,9 @@ impl<'src> Expression<'src> {
 				| Token::BracketCurlyClose
 				| Token::Indent(_)
 				| Token::Comma
-				| Token::Colon => {
+				| Token::Colon
+				| Token::To
+				| Token::Step => {
 					tokens.prev();
 					Ok(lhs)
 				}

@@ -4,18 +4,17 @@ fn main()
 	var n = n_sqrt * n_sqrt
 	var array = []
 
-	for i in n
-		var _ = array.push(true)
+	for i in n step 1
+		array.push(true)
 
-	for i in n_sqrt - 2
-		i += 2
+	for i in 2 to n_sqrt
 		if array[i]
 			var j = i * i
 			while j < n
 				array[j] = false
 				j += i
 
-	for i in array.len()
+	for i in array.len() step 1
 		var a = array[i]
-		if a == false
-			print(a)
+		if a
+			print(i)

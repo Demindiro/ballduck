@@ -4,8 +4,8 @@
 
 use ansi_term::Color;
 use ballscript::{CallError, Environment, ParseError, ScriptType, Variant};
-use std::{env, fs, io, process};
 use rustc_hash::FxHashSet;
+use std::{env, fs, io, process};
 
 pub fn main() {
 	let mut args = env::args();
@@ -130,6 +130,7 @@ mod tracer {
 	use ballscript as bs;
 	use std::cell::RefCell;
 	use std::rc::Rc;
+	use core::fmt;
 
 	struct TracerData {
 		show_vars: [u16; 3],
@@ -162,9 +163,13 @@ mod tracer {
 			let mut s = self.0.borrow_mut();
 			use bs::Instruction::*;
 			match instruction {
-				Add(a, b, c) => {
+				Add(a, b, c) | Mul(a, b, c) => {
 					s.show_vars = [*a, *b, *c];
 					s.show_vars_count = 3;
+				}
+				Move(a, b) => {
+					s.show_vars = [*a, *b, 0];
+					s.show_vars_count = 2;
 				}
 				_ => s.show_vars_count = 0,
 			}
@@ -198,6 +203,12 @@ mod tracer {
 				);
 			}
 			println!();
+		}
+	}
+
+	impl fmt::Debug for Tracer {
+		fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
+			Ok(())
 		}
 	}
 }

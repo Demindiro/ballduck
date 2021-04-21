@@ -1,7 +1,7 @@
 fn main()
 	for _ in 10_000_000
-		length(0.5, 0.7)
-	print(length(0.5, 0.7))
+		length_squared(0.5, 0.7)
+	#print(length(0.5, 0.7))
 	pass
 
 

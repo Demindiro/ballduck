@@ -2,7 +2,7 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::std_types::{FxHashMap, hash_map::Entry};
+use crate::std_types::{hash_map::Entry, FxHashMap};
 use crate::{CallError, CallResult, Rc, VariantType};
 
 #[derive(Default)]

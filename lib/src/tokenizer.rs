@@ -77,6 +77,8 @@ pub enum Token<'src> {
 	Catch,
 	True,
 	False,
+	To,
+	Step,
 }
 
 #[derive(Debug, PartialEq)]
@@ -292,6 +294,8 @@ impl Token<'_> {
 							"catch" => Token::Catch,
 							"true" => Token::True,
 							"false" => Token::False,
+							"to" => Token::To,
+							"step" => Token::Step,
 							_ => Token::Name(s),
 						},
 						i as u32,
@@ -350,13 +354,10 @@ impl<'src> TokenStream<'src> {
 		}
 	}
 
-	/// Rewinds the iterator by one token. Returns true if successful
-	pub fn prev(&mut self) -> bool {
+	/// Rewinds the iterator by one token
+	pub fn prev(&mut self) {
 		if self.current_index > 0 {
 			self.current_index -= 1;
-			true
-		} else {
-			false
 		}
 	}
 

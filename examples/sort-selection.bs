@@ -1,0 +1,21 @@
+fn main()
+	var list = [8, 4, 9, 2, 3, 7, 4, 1, 0]
+
+	print("Before: ", list)
+
+	var len = list.len()
+	len -= 1
+	for i in len
+		i += 1
+		for j in -i
+			j += i
+			var k = j - 1
+			if list[j] < list[k]
+				var tmp = list[j]
+				list[j] = list[k]
+				list[k] = tmp
+			else
+				continue
+				break
+
+	print("After: ", list)

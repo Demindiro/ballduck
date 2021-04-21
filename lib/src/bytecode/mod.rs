@@ -34,6 +34,14 @@ pub enum Instruction {
 
 	Iter(u16, u16, u32),
 	IterJmp(u16, u32),
+	IterInt {
+		reg: u16,
+		from: u16,
+		to: u16,
+		step: u16,
+		jmp_ip: u32,
+	},
+	IterIntJmp(u16, u32),
 
 	Add(u16, u16, u16),
 	Sub(u16, u16, u16),
@@ -165,9 +173,16 @@ where
 
 		let mut state = RunState { vars };
 
+		struct IterIntState {
+			current: isize,
+			step: isize,
+			stop: isize,
+		}
+
 		let mut ip = 0;
 		let mut iterators = Vec::new();
 		let mut call_args = Vec::new();
+		let mut iterators_int = Vec::new();
 
 		let _trace_run = TraceRun::new(tracer, self);
 
@@ -255,7 +270,59 @@ where
 							reg!(mut state reg) = e;
 							ip = *jmp_ip;
 						} else {
+							#[cfg(not(feature = "unsafe-loop"))]
 							let _ = iterators.pop().unwrap();
+							#[cfg(feature = "unsafe-loop")]
+							let _ = unsafe { iterators.pop().unwrap_unchecked() };
+						}
+					}
+					IterInt {
+						reg,
+						from,
+						to,
+						step,
+						jmp_ip,
+					} => {
+						let from = reg!(ref state from)
+							.as_integer()
+							.map_err(|_| RunError::IncompatibleType)?;
+						let to = reg!(ref state to)
+							.as_integer()
+							.map_err(|_| RunError::IncompatibleType)?;
+						let step = reg!(ref state step)
+							.as_integer()
+							.map_err(|_| RunError::IncompatibleType)?;
+						if from != to {
+							reg!(mut state reg) = V::new_integer(from);
+							iterators_int.push(IterIntState {
+								current: from,
+								stop: to,
+								step,
+							});
+						} else {
+							ip = *jmp_ip
+						}
+					}
+					IterIntJmp(reg, jmp_ip) => {
+						#[cfg(not(feature = "unsafe-loop"))]
+						let iter = iterators_int.last_mut().ok_or(RunError::NoIterator)?;
+						#[cfg(feature = "unsafe-loop")]
+						let iter = unsafe {
+							let i = iterators_int.len() - 1;
+							iterators_int.get_unchecked_mut(i)
+						};
+						iter.current += iter.step;
+						// >= is preferred over > so that step == 0 loops forever
+						if (iter.step >= 0 && iter.current < iter.stop)
+							|| (iter.step < 0 && iter.current > iter.stop)
+						{
+							reg!(mut state reg) = V::new_integer(iter.current);
+							ip = *jmp_ip;
+						} else {
+							#[cfg(not(feature = "unsafe-loop"))]
+							let _ = iterators_int.pop().unwrap();
+							#[cfg(feature = "unsafe-loop")]
+							let _ = unsafe { iterators_int.pop().unwrap_unchecked() };
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
@@ -358,6 +425,15 @@ impl Debug for Instruction {
 
 			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
 			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
+			IterInt {
+				reg,
+				from,
+				to,
+				step,
+				jmp_ip,
+			} => write!(f, "iterint {}, {}, {}, {}, {}", reg, from, to, step, jmp_ip),
+			IterIntJmp(r, p) => write!(f, "iterijp {}, {}", r, p),
+
 			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
 			JmpNotIf(r, p) => write!(f, "jmpnif  {}, {}", r, p),
 			Jmp(p) => write!(f, "jmp     {}", p),

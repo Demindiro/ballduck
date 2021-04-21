@@ -4,6 +4,7 @@
 
 #![allow(unstable_name_collisions)] // `unwrap_none` and `expect_none` are removed
 #![feature(box_patterns)]
+#![feature(option_result_unwrap_unchecked)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use unwrap_none::UnwrapNone;
@@ -18,7 +19,7 @@ mod variant;
 
 pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};
 pub use environment::Environment;
-pub use script::{CallError, Class, ScriptObject, ScriptType, Instance};
+pub use script::{CallError, Class, Instance, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
 pub use variant::{Variant, VariantType};
 
