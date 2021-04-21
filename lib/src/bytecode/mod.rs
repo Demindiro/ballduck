@@ -12,6 +12,7 @@ use crate::script::CallError;
 use crate::std_types::*;
 use crate::{Array, Dictionary, Environment, VariantType};
 use core::fmt::{self, Debug, Formatter};
+use core::intrinsics::unlikely;
 use core::mem;
 use tracer::*;
 
@@ -80,13 +81,14 @@ where
 	var_count: u16,
 	consts: Vec<V>,
 	name: Rc<str>,
+	max_call_args: u16,
 }
 
-pub struct RunState<V>
+pub struct RunState<'a, V>
 where
 	V: VariantType,
 {
-	vars: Vec<V>,
+	vars: &'a mut [V],
 }
 
 #[derive(Debug)]
@@ -97,6 +99,7 @@ pub enum RunError {
 	UndefinedFunction,
 	CallError(Box<CallError>),
 	IncorrectArgumentCount,
+	ArgumentOutOfBounds,
 	IncompatibleType,
 	NotBoolean,
 	LocalOutOfBounds,
@@ -164,12 +167,15 @@ where
 			return Err(RunError::IncorrectArgumentCount);
 		}
 
-		let mut vars = Vec::with_capacity(self.var_count as usize + self.consts.len());
+		let vars_len = self.var_count as usize + self.consts.len() + self.max_call_args as usize;
+		let mut vars = Vec::with_capacity(vars_len);
 		for a in args.iter() {
 			vars.push(a.clone());
 		}
 		vars.resize(self.var_count as usize, V::default());
 		vars.extend(self.consts.iter().cloned());
+		vars.resize(vars_len, V::default());
+		let (vars, call_args) = vars.split_at_mut(self.var_count as usize + self.consts.len());
 
 		let mut state = RunState { vars };
 
@@ -181,7 +187,6 @@ where
 
 		let mut ip = 0;
 		let mut iterators = Vec::new();
-		let mut call_args = Vec::new();
 		let mut iterators_int = Vec::new();
 
 		let _trace_run = TraceRun::new(tracer, self);
@@ -201,14 +206,18 @@ where
 							args,
 						},
 					) => {
-						for a in args.iter() {
-							call_args.push(reg!(ref state a).clone());
+						if unlikely(call_args.len() < args.len()) {
+							return Err(RunError::ArgumentOutOfBounds);
+						}
+						for (i, a) in args.iter().enumerate() {
+							call_args[i] = reg!(ref state a).clone();
 						}
 						let obj = reg!(ref state reg);
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = obj.call(func, &call_args[..], env).map_err(err::call)?;
+						let r = obj
+							.call(func, &call_args[..args.len()], env)
+							.map_err(err::call)?;
 						mem::drop(trace_call);
-						call_args.clear();
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
@@ -218,13 +227,17 @@ where
 						func,
 						args,
 					}) => {
-						for a in args.iter() {
-							call_args.push(reg!(ref state a).clone());
+						if unlikely(call_args.len() < args.len()) {
+							return Err(RunError::ArgumentOutOfBounds);
+						}
+						for (i, a) in args.iter().enumerate() {
+							call_args[i] = reg!(ref state a).clone();
 						}
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = env.call(func, &call_args[..]).map_err(err::call)?;
+						let r = env
+							.call(func, &call_args[..args.len()])
+							.map_err(err::call)?;
 						mem::drop(trace_call);
-						call_args.clear();
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
@@ -234,14 +247,16 @@ where
 						func,
 						args,
 					}) => {
-						for a in args.iter() {
-							call_args.push(reg!(ref state a).clone());
+						if unlikely(call_args.len() < args.len()) {
+							return Err(RunError::ArgumentOutOfBounds);
+						}
+						for (i, a) in args.iter().enumerate() {
+							call_args[i] = reg!(ref state a).clone();
 						}
 						let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = r.run(functions, locals, &call_args[..], env, tracer)?;
+						let r = r.run(functions, locals, &call_args[..args.len()], env, tracer)?;
 						mem::drop(trace_call);
-						call_args.clear();
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
@@ -403,7 +418,7 @@ where
 	}
 }
 
-impl<V> RunState<V>
+impl<V> RunState<'_, V>
 where
 	V: VariantType,
 {

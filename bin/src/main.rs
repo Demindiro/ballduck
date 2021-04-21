@@ -128,9 +128,9 @@ fn print_call_error(error: CallError) {
 #[cfg(feature = "print-instructions")]
 mod tracer {
 	use ballscript as bs;
+	use core::fmt;
 	use std::cell::RefCell;
 	use std::rc::Rc;
-	use core::fmt;
 
 	struct TracerData {
 		show_vars: [u16; 3],

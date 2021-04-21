@@ -5,6 +5,7 @@
 #![allow(unstable_name_collisions)] // `unwrap_none` and `expect_none` are removed
 #![feature(box_patterns)]
 #![feature(option_result_unwrap_unchecked)]
+#![feature(core_intrinsics)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use unwrap_none::UnwrapNone;

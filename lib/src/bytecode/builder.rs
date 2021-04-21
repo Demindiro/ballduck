@@ -26,6 +26,7 @@ where
 	loops: Vec<LoopContext>,
 	const_map: FxHashMap<Constant, u16>,
 	string_map: &'e mut FxHashSet<Rc<str>>,
+	max_call_args: u16,
 }
 
 struct LoopContext {
@@ -95,6 +96,7 @@ where
 			loops: Vec::new(),
 			const_map: HashMap::with_hasher(Default::default()),
 			string_map,
+			max_call_args: 0,
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -180,6 +182,7 @@ where
 			param_count: builder.param_count,
 			consts: builder.consts,
 			name,
+			max_call_args: builder.max_call_args,
 		})
 	}
 
@@ -671,6 +674,8 @@ where
 				..
 			} => {
 				let og_cvc = self.curr_var_count;
+
+				// Parse expression on which to call the function on
 				let expr = if let Some(expr) = expr {
 					let r = self.curr_var_count;
 					self.curr_var_count += 1;
@@ -679,6 +684,8 @@ where
 				} else {
 					None
 				};
+
+				// Parse arguments
 				let mut args = Vec::with_capacity(arguments.len());
 				for a in arguments {
 					let r = self.curr_var_count;
@@ -696,6 +703,8 @@ where
 					func: self.map_string(name),
 					args: args.into_boxed_slice(),
 				});
+				self.max_call_args = self.max_call_args.max(arguments.len() as u16);
+
 				self.instr.push(if let Some(expr) = expr {
 					Instruction::Call(expr, ca)
 				} else if self.methods.get(name).is_some() {
@@ -808,7 +817,8 @@ where
 
 	fn alloc_reg(&mut self, line: u32, column: u32) -> Result<u16, ByteCodeError<'s>> {
 		let r = self.curr_var_count;
-		self.curr_var_count = self.curr_var_count
+		self.curr_var_count = self
+			.curr_var_count
 			.checked_add(1)
 			.ok_or(ByteCodeError::new(
 				line,
