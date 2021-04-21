@@ -122,8 +122,13 @@ where
 					}
 				};
 				match i {
-					Call(_, box CallArgs { args, .. })
-					| CallSelf(box SelfCallArgs { args, .. })
+					Call(a, box CallArgs { args, .. }) => {
+						conv(a);
+						for a in args.iter_mut() {
+							conv(a);
+						}
+					}
+					CallSelf(box SelfCallArgs { args, .. })
 					| CallGlobal(box CallArgs { args, .. }) => {
 						for a in args.iter_mut() {
 							conv(a);
@@ -673,16 +678,20 @@ where
 				expr,
 				name,
 				arguments,
-				..
+				line,
+				column,
 			} => {
 				let og_cvc = self.curr_var_count;
 
 				// Parse expression on which to call the function on
 				let expr = if let Some(expr) = expr {
-					let r = self.curr_var_count;
-					self.curr_var_count += 1;
-					let e = self.parse_expression(Some(r), expr)?;
-					Some(if let Some(e) = e { e } else { r })
+					let r = self.alloc_reg(*line, *column)?;
+					Some(if let Some(r) = self.parse_expression(Some(r), expr)? {
+						self.dealloc_reg();
+						r
+					} else {
+						r
+					})
 				} else {
 					None
 				};
@@ -690,12 +699,10 @@ where
 				// Parse arguments
 				let mut args = Vec::with_capacity(arguments.len());
 				for a in arguments {
-					let r = self.curr_var_count;
-					self.curr_var_count += 1;
-					let e = self.parse_expression(Some(r), a)?;
-					if let Some(e) = e {
-						args.push(e);
-						self.curr_var_count -= 1;
+					let r = self.alloc_reg(*line, *column)?;
+					if let Some(r) = self.parse_expression(Some(r), a)? {
+						self.dealloc_reg();
+						args.push(r);
 					} else {
 						args.push(r);
 					}
