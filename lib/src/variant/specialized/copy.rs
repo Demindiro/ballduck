@@ -2,108 +2,31 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
+
 #[cfg(not(feature = "std"))]
 use crate::std_types::*;
 use crate::{CallError, CallResult, Environment, Rc, ScriptObject};
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 use core::{cmp, fmt};
 
-/// This trait must be implemented on custom Variant types.
-/// A custom variant is useful if you have a type that is common and needs to
-/// be able to be processed relatively quickly.
-pub trait VariantType
-where
-	Self:
-		Clone + fmt::Debug + fmt::Display + Default + From<bool> + PartialEq + PartialOrd + 'static,
-{
-	fn new_bool(value: bool) -> Self;
+use super::{VariantType, gen_op, check_arg_count};
 
-	fn new_integer(value: isize) -> Self;
-
-	fn new_real(value: f64) -> Self;
-
-	fn new_string(value: Rc<str>) -> Self;
-
-	fn new_object(value: ScriptObject<Self>) -> Self;
-
-	fn as_bool(&self) -> Result<bool, &Self>;
-
-	fn as_integer(&self) -> Result<isize, &Self>;
-
-	fn as_real(&self) -> Result<f64, &Self>;
-
-	fn as_string(self) -> Result<Rc<str>, Self>;
-
-	fn as_object(self) -> Result<ScriptObject<Self>, Self>;
-
-	fn call(&self, function: &str, args: &[&Self], env: &Environment<Self>) -> CallResult<Self>;
-
-	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>>;
-
-	fn index(&self, index: &Self) -> CallResult<Self>;
-
-	fn set_index(&self, index: &Self, value: Self) -> CallResult<()>;
-
-	// TODO this is stupid as hell but I'm out of ideas
-	fn add(&self, rhs: &Self) -> CallResult<Self>;
-	fn sub(&self, rhs: &Self) -> CallResult<Self>;
-	fn mul(&self, rhs: &Self) -> CallResult<Self>;
-	fn div(&self, rhs: &Self) -> CallResult<Self>;
-	fn rem(&self, rhs: &Self) -> CallResult<Self>;
-	fn bitand(&self, rhs: &Self) -> CallResult<Self>;
-	fn bitor(&self, rhs: &Self) -> CallResult<Self>;
-	fn bitxor(&self, rhs: &Self) -> CallResult<Self>;
-	fn lhs(&self, rhs: &Self) -> CallResult<Self>;
-	fn rhs(&self, rhs: &Self) -> CallResult<Self>;
-	fn neg(&self) -> CallResult<Self>;
-	fn not(&self) -> CallResult<Self>;
-}
-
-#[derive(Clone)]
-/// Variant type that encodes a few common types. Having the common types
-/// not be hidden behind a dyn trait improves performance greatly
+#[derive(Clone, Copy)]
+/// This is a special variant type that implements only types that implement Copy.
+/// This means it is _much_ faster to process in the interpreter loop, as there is
+/// no need to drop any values.
 pub enum Variant {
 	None,
 	Bool(bool),
 	Real(f64),
 	Integer(isize),
 	Char(char),
-	String(Rc<str>),
-	Object(ScriptObject<Self>),
 }
 
 impl Default for Variant {
 	fn default() -> Self {
 		Variant::None
 	}
-}
-
-macro_rules! check_arg_count {
-	($args:ident, $count:expr) => {
-		if $args.len() != $count {
-			return Err(CallError::BadArgumentCount);
-		}
-	};
-}
-
-macro_rules! gen_op {
-	(
-		$variant:ident, $trait:ident, $fn:ident
-		[$left:ident, $right:ident]
-		$([$lhs:ident, $rhs:ident] => $out:ident $code:block)*
-	) => {
-		impl<'a> $trait<&'a $variant> for &'a $variant {
-			type Output = CallResult<$variant>;
-
-			#[inline]
-			fn $fn(self, rhs: &'a $variant) -> Self::Output {
-				Ok(match (self, rhs) {
-					$((Variant::$lhs($left), Variant::$rhs($right)) => Variant::$out($code),)*
-					_ => return Err(CallError::IncompatibleType),
-				})
-			}
-		}
-	};
 }
 
 gen_op!(
@@ -113,11 +36,6 @@ gen_op!(
 	[Real, Integer] => Real { rhs + *lhs as f64 }
 	[Integer, Real] => Real { *rhs as f64 + lhs }
 	[Integer, Integer] => Integer { rhs + lhs }
-	[String, String] => String {
-		let mut out = rhs.to_string();
-		out.extend(lhs.chars());
-		out.into()
-	}
 );
 
 gen_op!(
@@ -226,8 +144,6 @@ impl PartialEq<Self> for Variant {
 			(Real(a), Integer(b)) => *a == *b as f64,
 			(Integer(a), Real(b)) => *a as f64 == *b,
 			(Integer(a), Integer(b)) => a == b,
-			(String(a), String(b)) => a == b,
-			(Char(a), Char(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -244,34 +160,38 @@ impl PartialOrd<Self> for Variant {
 			(Real(a), Integer(b)) => a.partial_cmp(&(*b as f64)),
 			(Integer(a), Real(b)) => (*a as f64).partial_cmp(b),
 			(Integer(a), Integer(b)) => a.partial_cmp(b),
-			(String(a), String(b)) => a.partial_cmp(b),
-			(Char(a), Char(b)) => a.partial_cmp(b),
 			_ => Option::None,
 		}
 	}
 }
 
 impl VariantType for Variant {
+	#[inline]
 	fn new_bool(value: bool) -> Self {
 		Self::Bool(value)
 	}
 
+	#[inline]
 	fn new_integer(value: isize) -> Self {
 		Self::Integer(value)
 	}
 
+	#[inline]
 	fn new_real(value: f64) -> Self {
 		Self::Real(value)
 	}
 
-	fn new_string(value: Rc<str>) -> Self {
-		Self::String(value)
+	#[inline]
+	fn new_string(_: Rc<str>) -> Self {
+		unimplemented!()
 	}
 
-	fn new_object(value: ScriptObject<Self>) -> Self {
-		Self::Object(value)
+	#[inline]
+	fn new_object(_: ScriptObject<Self>) -> Self {
+		unimplemented!()
 	}
 
+	#[inline]
 	fn as_bool(&self) -> Result<bool, &Self> {
 		if let Self::Bool(b) = self {
 			Ok(*b)
@@ -280,6 +200,7 @@ impl VariantType for Variant {
 		}
 	}
 
+	#[inline]
 	fn as_integer(&self) -> Result<isize, &Self> {
 		if let Self::Integer(b) = self {
 			Ok(*b)
@@ -288,6 +209,7 @@ impl VariantType for Variant {
 		}
 	}
 
+	#[inline]
 	fn as_real(&self) -> Result<f64, &Self> {
 		if let Self::Real(b) = self {
 			Ok(*b)
@@ -296,23 +218,17 @@ impl VariantType for Variant {
 		}
 	}
 
+	#[inline]
 	fn as_string(self) -> Result<Rc<str>, Self> {
-		if let Self::String(b) = self {
-			Ok(b)
-		} else {
-			Err(self)
-		}
+		Err(self)
 	}
 
+	#[inline]
 	fn as_object(self) -> Result<ScriptObject<Self>, Self> {
-		if let Self::Object(b) = self {
-			Ok(b)
-		} else {
-			Err(self)
-		}
+		Err(self)
 	}
 
-	fn call(&self, function: &str, args: &[&Self], env: &Environment<Self>) -> CallResult<Self> {
+	fn call(&self, function: &str, args: &[&Self], _: &Environment<Self>) -> CallResult<Self> {
 		Ok(match self {
 			Self::None => return Err(CallError::IsEmpty),
 			Self::Real(r) => match function {
@@ -333,18 +249,11 @@ impl VariantType for Variant {
 				}
 				_ => return Err(CallError::UndefinedFunction),
 			},
-			Self::String(s) => match function {
-				"len" => {
-					check_arg_count!(args, 0);
-					Variant::Integer(s.len() as isize)
-				}
-				_ => return Err(CallError::UndefinedFunction),
-			},
-			Self::Object(o) => return o.call(function, args, env),
 			_ => return Err(CallError::UndefinedFunction),
 		})
 	}
 
+	#[inline]
 	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>> {
 		match self {
 			Variant::None => Err(CallError::IsEmpty),
@@ -355,59 +264,65 @@ impl VariantType for Variant {
 					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
 				}
 			}
-			Variant::String(s) => Ok(Box::new(StringIter::new(s.clone()))),
-			Variant::Object(o) => o.iter(),
 			_ => Err(CallError::IncompatibleType),
 		}
 	}
 
-	fn index(&self, index: &Self) -> CallResult<Self> {
-		match self {
-			Self::Object(obj) => obj.index(index),
-			_ => Err(CallError::IncompatibleType),
-		}
+	#[inline]
+	fn index(&self, _: &Self) -> CallResult<Self> {
+		Err(CallError::IncompatibleType)
 	}
 
-	fn set_index(&self, index: &Self, value: Self) -> CallResult<()> {
-		match self {
-			Self::Object(obj) => obj.set_index(index, value),
-			_ => Err(CallError::IncompatibleType),
-		}
+	#[inline]
+	fn set_index(&self, _: &Self, _: Self) -> CallResult<()> {
+		Err(CallError::IncompatibleType)
 	}
 
+	#[inline]
 	fn add(&self, rhs: &Self) -> CallResult<Self> {
 		self + rhs
 	}
+	#[inline]
 	fn sub(&self, rhs: &Self) -> CallResult<Self> {
 		self - rhs
 	}
+	#[inline]
 	fn mul(&self, rhs: &Self) -> CallResult<Self> {
 		self * rhs
 	}
+	#[inline]
 	fn div(&self, rhs: &Self) -> CallResult<Self> {
 		self / rhs
 	}
+	#[inline]
 	fn rem(&self, rhs: &Self) -> CallResult<Self> {
 		self % rhs
 	}
+	#[inline]
 	fn bitand(&self, rhs: &Self) -> CallResult<Self> {
 		self & rhs
 	}
+	#[inline]
 	fn bitor(&self, rhs: &Self) -> CallResult<Self> {
 		self | rhs
 	}
+	#[inline]
 	fn bitxor(&self, rhs: &Self) -> CallResult<Self> {
 		self ^ rhs
 	}
+	#[inline]
 	fn lhs(&self, rhs: &Self) -> CallResult<Self> {
 		self << rhs
 	}
+	#[inline]
 	fn rhs(&self, rhs: &Self) -> CallResult<Self> {
 		self >> rhs
 	}
+	#[inline]
 	fn neg(&self) -> CallResult<Self> {
 		-self
 	}
+	#[inline]
 	fn not(&self) -> CallResult<Self> {
 		!self
 	}
@@ -423,12 +338,6 @@ impl fmt::Debug for Variant {
 			Variant::Real(n) => f.write_str(n.to_string().as_str()),
 			Variant::Integer(n) => f.write_str(n.to_string().as_str()),
 			Variant::Char(n) => f.write_char(*n),
-			Variant::String(n) => {
-				f.write_char('"')?;
-				f.write_str(n)?;
-				f.write_char('"')
-			}
-			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}
 }
@@ -443,8 +352,6 @@ impl fmt::Display for Variant {
 			Variant::Real(n) => f.write_str(n.to_string().as_str()),
 			Variant::Integer(n) => f.write_str(n.to_string().as_str()),
 			Variant::Char(n) => f.write_char(*n),
-			Variant::String(n) => f.write_str(n),
-			Variant::Object(n) => f.write_str(n.to_string().as_str()),
 		}
 	}
 }
@@ -452,33 +359,5 @@ impl fmt::Display for Variant {
 impl From<bool> for Variant {
 	fn from(var: bool) -> Self {
 		Variant::Bool(var)
-	}
-}
-
-// DO NOT REORDER THE FIELDS: the drop order is important!
-struct StringIter<'a> {
-	iter: core::str::Chars<'a>,
-	_string: Rc<str>,
-}
-
-impl<'a> StringIter<'a> {
-	fn new(string: Rc<str>) -> Self {
-		let iter = string.chars();
-		// SAFETY: the reference held by `iter` is valid as long as `string´ isn't dropped
-		unsafe {
-			let iter = core::mem::transmute(iter);
-			Self {
-				_string: string,
-				iter,
-			}
-		}
-	}
-}
-
-impl Iterator for StringIter<'_> {
-	type Item = Variant;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().map(Variant::Char)
 	}
 }

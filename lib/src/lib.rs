@@ -25,6 +25,7 @@ pub use environment::Environment;
 pub use script::{CallError, Class, Instance, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
 pub use variant::{Variant, VariantType};
+pub use variant::specialized;
 
 use bytecode::{ByteCodeBuilder, ByteCodeError};
 use script::Script;

@@ -13,3 +13,4 @@ ballscript = { path = "../lib" }
 
 [features]
 print-instructions = []
+copy-variant = []

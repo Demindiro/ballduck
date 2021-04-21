@@ -3,7 +3,11 @@
 // This file is licensed under the MIT license. See LICENSE for details.
 
 use ansi_term::Color;
-use ballscript::{CallError, Environment, ParseError, ScriptType, Variant};
+use ballscript::{CallError, Environment, ParseError, ScriptType};
+#[cfg(not(feature = "copy-variant"))]
+use ballscript::Variant;
+#[cfg(feature = "copy-variant")]
+use ballscript::specialized::CopyVariant as Variant;
 use rustc_hash::FxHashSet;
 use std::{env, fs, io, process};
 

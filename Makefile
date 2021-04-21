@@ -12,6 +12,10 @@ run-%:
 	cargo build --release
 	bash -c 'time $(OUTPUT) $$PWD/examples/$*.bs'
 
+run-copy-%:
+	cargo build --release --features copy-variant
+	bash -c 'time $(OUTPUT) $$PWD/examples/$*.bs'
+
 vg-run-%:
 	cargo build --release
 	valgrind $(OUTPUT) $$PWD/examples/$*.bs
