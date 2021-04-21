@@ -6,6 +6,8 @@
 #![feature(box_patterns)]
 #![feature(option_result_unwrap_unchecked)]
 #![feature(core_intrinsics)]
+#![feature(maybe_uninit_array_assume_init)]
+#![feature(maybe_uninit_uninit_array)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use unwrap_none::UnwrapNone;
@@ -126,16 +128,17 @@ where
 
 	let mut script = Script::new(locals, tracer);
 
-	let mut methods = FxHashMap::with_capacity_and_hasher(ast.functions.len(), Default::default());
-	for f in ast.functions.iter() {
-		methods.insert(f.name, ()).expect_none("Duplicate function");
+	for (i, f) in ast.functions.iter().enumerate() {
+		let i = i as u16;
+		let name = f.name.into();
+		script.function_map.insert(name, i).expect_none("Duplicate function");
 	}
 	for f in ast.functions {
-		let name = f.name.into();
-		ByteCodeBuilder::parse(f, &methods, &script.locals, string_map)
-			.map(|f| script.functions.insert(name, f))
+		ByteCodeBuilder::parse(f, &script.function_map, &script.locals, string_map)
+			.map(|f| script.functions.push(f))
 			.map_err(|e| ParseError::new_bytecode(source, e))?;
 	}
+	script.function_map.shrink_to_fit();
 	script.functions.shrink_to_fit();
 
 	Ok(script.into())

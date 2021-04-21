@@ -36,7 +36,7 @@ where
 
 	fn as_object(self) -> Result<ScriptObject<Self>, Self>;
 
-	fn call(&self, function: &str, args: &[Self], env: &Environment<Self>) -> CallResult<Self>;
+	fn call(&self, function: &str, args: &[&Self], env: &Environment<Self>) -> CallResult<Self>;
 
 	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>>;
 
@@ -312,7 +312,7 @@ impl VariantType for Variant {
 		}
 	}
 
-	fn call(&self, function: &str, args: &[Self], env: &Environment<Self>) -> CallResult<Self> {
+	fn call(&self, function: &str, args: &[&Self], env: &Environment<Self>) -> CallResult<Self> {
 		Ok(match self {
 			Self::None => return Err(CallError::IsEmpty),
 			Self::Real(r) => match function {

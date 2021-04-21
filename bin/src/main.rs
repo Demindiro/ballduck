@@ -185,6 +185,14 @@ mod tracer {
 			println!("[{}] Exited {}", bytecode.name(), function);
 		}
 
+		fn call_self_pre(&self, bytecode: &bs::ByteCode<V>, function: u16) {
+			println!("[{}] Entering {}", bytecode.name(), function);
+		}
+
+		fn call_self_post(&self, bytecode: &bs::ByteCode<V>, function: u16) {
+			println!("[{}] Exited {}", bytecode.name(), function);
+		}
+
 		fn run_pre(&self, bytecode: &bs::ByteCode<V>) {
 			println!("[{}] Entered", bytecode.name());
 		}

@@ -109,7 +109,7 @@ impl<V> ScriptType<V> for Array<V>
 where
 	V: VariantType,
 {
-	fn call(&self, function: &str, args: &[V], _: &Environment<V>) -> CallResult<V> {
+	fn call(&self, function: &str, args: &[&V], _: &Environment<V>) -> CallResult<V> {
 		match function {
 			"len" => {
 				check_arg_count!(args, 0);
@@ -196,7 +196,7 @@ impl<V> ScriptType<V> for Dictionary<V>
 where
 	V: VariantType,
 {
-	fn call(&self, function: &str, args: &[V], _: &Environment<V>) -> CallResult<V> {
+	fn call(&self, function: &str, args: &[&V], _: &Environment<V>) -> CallResult<V> {
 		match function {
 			"len" => {
 				check_arg_count!(args, 0);

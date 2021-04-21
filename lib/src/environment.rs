@@ -13,7 +13,7 @@ where
 	functions: FxHashMap<Rc<str>, EnvironmentFunction<V>>,
 }
 
-pub type EnvironmentFunction<V> = Box<dyn Fn(&[V]) -> CallResult<V>>;
+pub type EnvironmentFunction<V> = Box<dyn Fn(&[&V]) -> CallResult<V>>;
 
 #[derive(Debug)]
 pub enum EnvironmentError {
@@ -44,7 +44,7 @@ where
 		}
 	}
 
-	pub fn call(&self, func: &str, args: &[V]) -> CallResult<V> {
+	pub fn call(&self, func: &str, args: &[&V]) -> CallResult<V> {
 		self.functions
 			.get(func)
 			.ok_or(CallError::UndefinedFunction)?(args)

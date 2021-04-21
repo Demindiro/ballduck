@@ -22,9 +22,15 @@ pub struct CallArgs {
 	args: Box<[u16]>,
 }
 
+pub struct SelfCallArgs {
+	store_in: Option<u16>,
+	func: u16,
+	args: Box<[u16]>,
+}
+
 pub enum Instruction {
 	Call(u16, Box<CallArgs>),
-	CallSelf(Box<CallArgs>),
+	CallSelf(Box<SelfCallArgs>),
 	CallGlobal(Box<CallArgs>),
 
 	Jmp(u32),
@@ -154,9 +160,9 @@ where
 {
 	pub(crate) fn run<T>(
 		&self,
-		functions: &FxHashMap<Rc<str>, Self>,
+		functions: &[Self],
 		locals: &mut [V],
-		args: &[V],
+		args: &[&V],
 		env: &Environment<V>,
 		tracer: &T,
 	) -> Result<V, RunError>
@@ -167,15 +173,55 @@ where
 			return Err(RunError::IncorrectArgumentCount);
 		}
 
-		let vars_len = self.var_count as usize + self.consts.len() + self.max_call_args as usize;
+		/*
+		let vars_len = self.var_count as usize + self.consts.len();
 		let mut vars = Vec::with_capacity(vars_len);
-		for a in args.iter() {
-			vars.push(a.clone());
-		}
-		vars.resize(self.var_count as usize, V::default());
+		vars.extend(args.iter().copied().cloned());
+		vars.resize_with(self.var_count as usize, || V::default());
 		vars.extend(self.consts.iter().cloned());
-		vars.resize(vars_len, V::default());
-		let (vars, call_args) = vars.split_at_mut(self.var_count as usize + self.consts.len());
+		let vars = &mut vars[..];
+		*/
+
+		// This version is faster but obviously not as safe
+		// The "zero-cost" abstractions turned out to be slower, so there is some
+		// manual work involved now.
+		// Hopefully the safe version will be as fast as this eventually.
+		let vars_len = self.var_count as usize + self.consts.len();
+		let mut vars = Vec::with_capacity(vars_len);
+		vars.resize_with(vars_len, || mem::MaybeUninit::uninit());
+		// Initializes all elements from 0 to args.len()
+		for (i, v) in args
+			.iter()
+			.copied()
+			.cloned()
+			.map(|v| mem::MaybeUninit::new(v))
+			.enumerate()
+		{
+			vars[i] = v;
+		}
+		// Initializes all elements from args.len() to self.var_count
+		for i in args.len()..self.var_count as usize {
+			vars[i] = mem::MaybeUninit::new(V::default());
+		}
+		// Initializes all elements from self.var_count to (self.var_count + self.consts.len())
+		// vars_len == self.var_count + self.consts.len(), hence this initializes the remaining
+		// elements.
+		for (i, v) in self
+			.consts
+			.iter()
+			.cloned()
+			.map(|v| mem::MaybeUninit::new(v))
+			.enumerate()
+		{
+			vars[i + self.var_count as usize] = v;
+		}
+		let vars = &mut vars[..];
+		// SAFETY: all variables are initialized
+		let vars = unsafe { mem::transmute(vars) };
+
+		let mut call_args = Vec::new();
+		call_args.resize(self.max_call_args as usize, core::ptr::null());
+		let call_args = &mut call_args[..];
 
 		let mut state = RunState { vars };
 
@@ -206,18 +252,23 @@ where
 							args,
 						},
 					) => {
+						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
 							return Err(RunError::ArgumentOutOfBounds);
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!(ref state a).clone();
+							call_args[i] = reg!(ref state a) as *const V;
 						}
+						// SAFETY: All the pointers are valid references.
+						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+
+						// Perform call
 						let obj = reg!(ref state reg);
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = obj
-							.call(func, &call_args[..args.len()], env)
-							.map_err(err::call)?;
+						let r = obj.call(func, ca, env).map_err(err::call)?;
 						mem::drop(trace_call);
+
+						// Store return value
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
@@ -227,36 +278,51 @@ where
 						func,
 						args,
 					}) => {
+						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
 							return Err(RunError::ArgumentOutOfBounds);
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!(ref state a).clone();
+							call_args[i] = reg!(ref state a) as *const V;
 						}
+						// SAFETY: All the pointers are valid references.
+						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+
+						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = env
-							.call(func, &call_args[..args.len()])
-							.map_err(err::call)?;
+						let r = env.call(func, ca).map_err(err::call)?;
 						mem::drop(trace_call);
+
+						// Store return value
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
 					}
-					CallSelf(box CallArgs {
+					CallSelf(box SelfCallArgs {
 						store_in,
 						func,
 						args,
 					}) => {
+						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
 							return Err(RunError::ArgumentOutOfBounds);
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!(ref state a).clone();
+							call_args[i] = reg!(ref state a) as *const V;
 						}
-						let r = functions.get(func).ok_or(RunError::UndefinedFunction)?;
-						let trace_call = TraceCall::new(tracer, self, func);
-						let r = r.run(functions, locals, &call_args[..args.len()], env, tracer)?;
+						// SAFETY: All the pointers are valid references.
+						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+
+						// Perform call
+						#[cfg(not(feature = "unsafe-loop"))]
+						let r = functions.get(*func as usize).ok_or(RunError::UndefinedFunction)?;
+						#[cfg(feature = "unsafe-loop")]
+						let r = unsafe { functions.get_unchecked(*func as usize) };
+						let trace_call = TraceSelfCall::new(tracer, self, *func);
+						let r = r.run(functions, locals, ca, env, tracer)?;
 						mem::drop(trace_call);
+
+						// Store return value
 						if let Some(reg) = store_in {
 							reg!(mut state reg) = r;
 						}
@@ -483,8 +549,18 @@ impl Debug for Instruction {
 	}
 }
 
-impl Debug for CallArgs {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Debug for CallArgs {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Some(n) = self.store_in {
+			write!(f, "{}, \"{}\", {:?}", n, self.func, self.args)
+		} else {
+			write!(f, "none, \"{}\", {:?}", self.func, self.args)
+		}
+	}
+}
+
+impl fmt::Debug for SelfCallArgs {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if let Some(n) = self.store_in {
 			write!(f, "{}, \"{}\", {:?}", n, self.func, self.args)
 		} else {

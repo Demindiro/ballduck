@@ -24,6 +24,12 @@ where
 	/// Called right after a function call
 	fn call_post(&self, bytecode: &ByteCode<V>, function: &Rc<str>);
 
+	/// Called right before a function call
+	fn call_self_pre(&self, bytecode: &ByteCode<V>, function: u16);
+
+	/// Called right after a function call
+	fn call_self_post(&self, bytecode: &ByteCode<V>, function: u16);
+
 	/// Called at the start of a bytecode run
 	fn run_pre(&self, bytecode: &ByteCode<V>);
 
@@ -51,6 +57,12 @@ where
 
 	#[inline(always)]
 	fn call_post(&self, _: &ByteCode<V>, _: &Rc<str>) {}
+
+	#[inline(always)]
+	fn call_self_pre(&self, _: &ByteCode<V>, _: u16) {}
+
+	#[inline(always)]
+	fn call_self_post(&self, _: &ByteCode<V>, _: u16) {}
 
 	#[inline(always)]
 	fn run_pre(&self, _: &ByteCode<V>) {}
@@ -132,6 +144,45 @@ where
 	#[inline(always)]
 	fn drop(&mut self) {
 		self.tracer.call_post(self.bytecode, self.function);
+	}
+}
+
+/// Starts tracing a local call and automatically calls `call_pos` when it is dropped.
+/// Useful in conjuction with the `?` syntax and panics.
+pub(super) struct TraceSelfCall<'a, V, T>
+where
+	V: VariantType,
+	T: Tracer<V>,
+{
+	bytecode: &'a ByteCode<V>,
+	tracer: &'a T,
+	function: u16,
+}
+
+impl<'a, V, T> TraceSelfCall<'a, V, T>
+where
+	V: VariantType,
+	T: Tracer<V>,
+{
+	#[inline(always)]
+	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>, function: u16) -> Self {
+		tracer.call_self_pre(bytecode, function);
+		Self {
+			tracer,
+			bytecode,
+			function,
+		}
+	}
+}
+
+impl<V, T> Drop for TraceSelfCall<'_, V, T>
+where
+	V: VariantType,
+	T: Tracer<V>,
+{
+	#[inline(always)]
+	fn drop(&mut self) {
+		self.tracer.call_self_post(self.bytecode, self.function);
 	}
 }
 

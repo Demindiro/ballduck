@@ -15,7 +15,7 @@ pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
 where
 	V: VariantType,
 {
-	methods: &'e FxHashMap<&'e str, ()>,
+	methods: &'e FxHashMap<Rc<str>, u16>,
 	locals: &'e FxHashMap<Rc<str>, u16>,
 	instr: Vec<Instruction>,
 	vars: FxHashMap<&'s str, u16>,
@@ -80,7 +80,7 @@ where
 {
 	pub(crate) fn parse(
 		function: Function<'s>,
-		methods: &'e FxHashMap<&'s str, ()>,
+		methods: &'e FxHashMap<Rc<str>, u16>,
 		locals: &'e FxHashMap<Rc<str>, u16>,
 		string_map: &'e mut FxHashSet<Rc<str>>,
 	) -> Result<ByteCode<V>, ByteCodeError<'s>> {
@@ -122,8 +122,10 @@ where
 					}
 				};
 				match i {
-					Call(_, box ca) | CallSelf(box ca) | CallGlobal(box ca) => {
-						for a in ca.args.iter_mut() {
+					Call(_, box CallArgs { args, .. })
+					| CallSelf(box SelfCallArgs { args, .. })
+					| CallGlobal(box CallArgs { args, .. }) => {
+						for a in args.iter_mut() {
 							conv(a);
 						}
 					}
@@ -707,7 +709,12 @@ where
 
 				self.instr.push(if let Some(expr) = expr {
 					Instruction::Call(expr, ca)
-				} else if self.methods.get(name).is_some() {
+				} else if let Some(&func) = self.methods.get(&name[..]) {
+					let ca = Box::new(SelfCallArgs {
+						store_in: ca.store_in,
+						func,
+						args: ca.args,
+					});
 					Instruction::CallSelf(ca)
 				} else {
 					Instruction::CallGlobal(ca)

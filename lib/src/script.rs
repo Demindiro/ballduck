@@ -23,8 +23,9 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	pub(crate) functions: FxHashMap<Rc<str>, ByteCode<V>>,
+	pub(crate) function_map: FxHashMap<Rc<str>, u16>,
 	pub(crate) locals: FxHashMap<Rc<str>, u16>,
+	pub(crate) functions: Vec<ByteCode<V>>,
 	tracer: T,
 }
 
@@ -69,7 +70,7 @@ where
 	V: VariantType,
 {
 	/// Calls the method with the given name on this script instance
-	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V>;
+	fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V>;
 
 	#[inline]
 	fn type_id(&self) -> TypeId {
@@ -128,7 +129,8 @@ where
 {
 	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>, tracer: T) -> Self {
 		Self {
-			functions: FxHashMap::with_hasher(Default::default()),
+			function_map: FxHashMap::with_hasher(Default::default()),
+			functions: Vec::new(),
 			locals,
 			tracer,
 		}
@@ -138,10 +140,11 @@ where
 		&self,
 		function: &str,
 		locals: &mut [V],
-		args: &[V],
+		args: &[&V],
 		env: &Environment<V>,
 	) -> CallResult<V> {
-		if let Some(function) = self.functions.get(function) {
+		if let Some(&function) = self.function_map.get(function) {
+			let function = &self.functions[function as usize];
 			function
 				.run(&self.functions, locals, args, &env, &self.tracer)
 				.map_err(CallError::RunError)
@@ -181,7 +184,7 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	fn call(&self, function: &str, args: &[V], env: &Environment<V>) -> CallResult<V> {
+	fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
 			self.script.call_traced(function, &mut vars, args, env)
 		} else {
