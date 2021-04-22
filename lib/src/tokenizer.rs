@@ -79,6 +79,11 @@ pub enum Token<'src> {
 	False,
 	To,
 	Step,
+	_Self,
+	Env,
+	Int,
+	Real,
+	Str,
 }
 
 #[derive(Debug, PartialEq)]
@@ -296,6 +301,10 @@ impl Token<'_> {
 							"false" => Token::False,
 							"to" => Token::To,
 							"step" => Token::Step,
+							"env" => Token::Env,
+							"int" => Token::Int,
+							"real" => Token::Real,
+							"str" => Token::Str,
 							_ => Token::Name(s),
 						},
 						i as u32,
