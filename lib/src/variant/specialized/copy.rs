@@ -113,7 +113,7 @@ impl core::ops::Neg for &Variant {
 		Ok(match self {
 			Integer(i) => Integer(-i),
 			Real(r) => Real(-r),
-			_ => return Err(CallError::IncompatibleType),
+			_ => return Err(CallError::incompatible_type()),
 		})
 	}
 }
@@ -126,7 +126,7 @@ impl core::ops::Not for &Variant {
 		Ok(match self {
 			Bool(b) => Bool(!b),
 			Integer(i) => Integer(!i),
-			_ => return Err(CallError::IncompatibleType),
+			_ => return Err(CallError::incompatible_type()),
 		})
 	}
 }
@@ -229,7 +229,7 @@ impl VariantType for Variant {
 
 	fn call(&self, function: &str, args: &[&Self], _: &Environment<Self>) -> CallResult<Self> {
 		Ok(match self {
-			Self::None => return Err(CallError::IsEmpty),
+			Self::None => return Err(CallError::empty()),
 			Self::Real(r) => match function {
 				"abs" => {
 					check_arg_count!(args, 0);
@@ -239,23 +239,23 @@ impl VariantType for Variant {
 					check_arg_count!(args, 0);
 					Self::Real(r.sqrt())
 				}
-				_ => return Err(CallError::UndefinedFunction),
+				_ => return Err(CallError::undefined_function()),
 			},
 			Self::Integer(i) => match function {
 				"abs" => {
 					check_arg_count!(args, 0);
 					Self::Integer(i.abs())
 				}
-				_ => return Err(CallError::UndefinedFunction),
+				_ => return Err(CallError::undefined_function()),
 			},
-			_ => return Err(CallError::UndefinedFunction),
+			_ => return Err(CallError::undefined_function()),
 		})
 	}
 
 	#[inline]
 	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = Self>>> {
 		match self {
-			Variant::None => Err(CallError::IsEmpty),
+			Variant::None => Err(CallError::empty()),
 			&Variant::Integer(i) => {
 				if i < 0 {
 					Ok(Box::new((i + 1..=0).rev().map(|i| Variant::Integer(i))))
@@ -263,18 +263,18 @@ impl VariantType for Variant {
 					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
 				}
 			}
-			_ => Err(CallError::IncompatibleType),
+			_ => Err(CallError::incompatible_type()),
 		}
 	}
 
 	#[inline]
 	fn index(&self, _: &Self) -> CallResult<Self> {
-		Err(CallError::IncompatibleType)
+		Err(CallError::incompatible_type())
 	}
 
 	#[inline]
 	fn set_index(&self, _: &Self, _: Self) -> CallResult<()> {
-		Err(CallError::IncompatibleType)
+		Err(CallError::incompatible_type())
 	}
 
 	#[inline]

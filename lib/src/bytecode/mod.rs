@@ -8,12 +8,12 @@ mod tracer;
 pub(crate) use builder::{ByteCodeBuilder, ByteCodeError};
 pub use tracer::Tracer;
 
-use crate::script::CallError;
 use crate::std_types::*;
 use crate::{Array, Dictionary, Environment, ScriptObject, VariantType};
 use core::fmt::{self, Debug, Formatter};
 use core::intrinsics::unlikely;
 use core::mem;
+use std::error::Error;
 use tracer::*;
 
 pub struct CallArgs {
@@ -101,7 +101,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum RunError {
+pub(crate) enum RunError {
 	IpOutOfBounds,
 	RegisterOutOfBounds,
 	NoIterator,
@@ -113,18 +113,18 @@ pub enum RunError {
 	LocalOutOfBounds,
 }
 
-pub type CallResult<T> = Result<T, CallError>;
+pub type CallResult<T> = Result<T, Box<dyn Error>>;
 
 #[cfg(not(feature = "unsafe-loop"))]
 macro_rules! reg {
 	(ref $state:ident $reg:ident) => {
-		$state.vars.get(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+		$state.vars.get(*$reg as usize).ok_or_else(err::roob)?
 	};
 	(mut $state:ident $reg:ident) => {
 		*reg!(ref mut $state $reg)
 	};
 	(ref mut $state:ident $reg:expr) => {
-		$state.vars.get_mut(*$reg as usize).ok_or(RunError::RegisterOutOfBounds)?
+		$state.vars.get_mut(*$reg as usize).ok_or_else(err::roob)?
 	};
 }
 
@@ -146,23 +146,17 @@ macro_rules! run_op {
 		{
 			// This allows the compiler to do the 3 registers checks in one go
 			if *$r as usize >= $state.vars.len() {
-				return Err(RunError::RegisterOutOfBounds);
+				return Err(err::roob());
 			}
-			match reg!(ref $state $a).$op(reg!(ref $state $b)) {
-				Ok(v) => reg!(mut $state $r) = v,
-				Err(e) => return Ok(Err(e)),
-			}
+			reg!(mut $state $r) = reg!(ref $state $a).$op(reg!(ref $state $b))?;
 		}
 	};
 	($state:ident, $r:ident = $a:ident $op:tt) => {
 		{
 			if *$r as usize >= $state.vars.len() {
-				return Err(RunError::RegisterOutOfBounds);
+				return Err(err::roob());
 			}
-			match reg!(ref $state $a).$op() {
-				Ok(v) => reg!(mut $state $r) = v,
-				Err(e) => return Ok(Err(e)),
-			}
+			reg!(mut $state $r) = reg!(ref $state $a).$op()?;
 		}
 	};
 }
@@ -185,12 +179,12 @@ where
 		args: &[&V],
 		env: &Environment<V>,
 		tracer: &T,
-	) -> Result<CallResult<V>, RunError>
+	) -> Result<V, Box<dyn std::error::Error>>
 	where
 		T: Tracer<V>,
 	{
 		if args.len() != self.param_count as usize {
-			return Err(RunError::IncorrectArgumentCount);
+			return Err(err::arg_count());
 		}
 
 		let vars_len = self.var_count as usize + self.consts.len();
@@ -287,7 +281,7 @@ where
 					) => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
-							return Err(RunError::ArgumentOutOfBounds);
+							return Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
 							call_args[i] = reg!(ref state a) as *const V;
@@ -298,10 +292,7 @@ where
 						// Perform call
 						let obj = reg!(ref state reg);
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = match obj.call(func, ca, env) {
-							Ok(v) => v,
-							Err(e) => return Ok(Err(e)),
-						};
+						let r = obj.call(func, ca, env)?;
 						mem::drop(trace_call);
 
 						// Store return value
@@ -316,7 +307,7 @@ where
 					}) => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
-							return Err(RunError::ArgumentOutOfBounds);
+							return Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
 							call_args[i] = reg!(ref state a) as *const V;
@@ -326,10 +317,7 @@ where
 
 						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = match env.call(func, ca) {
-							Ok(v) => v,
-							Err(e) => return Ok(Err(e)),
-						};
+						let r = env.call(func, ca)?;
 						mem::drop(trace_call);
 
 						// Store return value
@@ -344,7 +332,7 @@ where
 					}) => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
-							return Err(RunError::ArgumentOutOfBounds);
+							return Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
 							call_args[i] = reg!(ref state a) as *const V;
@@ -361,11 +349,7 @@ where
 						let r = unsafe { functions.get_unchecked(*func as usize) };
 
 						let trace_call = TraceSelfCall::new(tracer, self, *func);
-						let r = match r.run(object, functions, locals, ca, env, tracer) {
-							Err(e) => return Err(e),
-							Ok(Err(e)) => return Ok(Err(e)),
-							Ok(Ok(v)) => v,
-						};
+						let r = r.run(object, functions, locals, ca, env, tracer)?;
 						mem::drop(trace_call);
 
 						// Store return value
@@ -373,14 +357,11 @@ where
 							reg!(mut state reg) = r;
 						}
 					}
-					RetSome(reg) => break Ok(Ok(mem::take(reg!(ref mut state reg)))),
-					RetNone => break Ok(Ok(V::default())),
+					RetSome(reg) => break Ok(mem::take(reg!(ref mut state reg))),
+					RetNone => break Ok(V::default()),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = reg!(ref state iter);
-						let mut iter = match iter.iter() {
-							Ok(v) => v,
-							Err(e) => return Ok(Err(e)),
-						};
+						let mut iter = iter.iter()?;
 						if let Some(e) = iter.next() {
 							reg!(mut state reg) = e;
 							iterators.push(iter);
@@ -462,7 +443,7 @@ where
 								ip = *jmp_ip;
 							}
 						} else {
-							return Err(RunError::NotBoolean);
+							return Err(err::boolean());
 						}
 					}
 					JmpNotIf(reg, jmp_ip) => {
@@ -472,7 +453,7 @@ where
 								ip = *jmp_ip;
 							}
 						} else {
-							return Err(RunError::NotBoolean);
+							return Err(err::boolean());
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
@@ -493,15 +474,11 @@ where
 					Neg(r, a) => run_op!(state, r = a neg),
 					Not(r, a) => run_op!(state, r = a not),
 					Store(r, l) => {
-						*locals
-							.get_mut(*l as usize)
-							.ok_or(RunError::LocalOutOfBounds)? = reg!(ref state r).clone();
+						*locals.get_mut(*l as usize).ok_or_else(err::loob)? =
+							reg!(ref state r).clone();
 					}
 					Load(r, l) => {
-						reg!(mut state r) = locals
-							.get(*l as usize)
-							.ok_or(RunError::LocalOutOfBounds)?
-							.clone();
+						reg!(mut state r) = locals.get(*l as usize).ok_or_else(err::loob)?.clone();
 					}
 					Move(d, s) => reg!(mut state d) = reg!(ref state s).clone(),
 					CopySelf { dest } => reg!(mut state dest) = V::new_object(object.clone()),
@@ -514,20 +491,15 @@ where
 						reg!(mut state r) = V::new_object(ScriptObject(d));
 					}
 					GetIndex(r, o, i) => {
-						reg!(mut state r) = match reg!(ref state o).index(reg!(ref state i)) {
-							Ok(v) => v,
-							Err(e) => return Ok(Err(e)),
-						}
+						reg!(mut state r) = reg!(ref state o).index(reg!(ref state i))?
 					}
-					SetIndex(r, o, i) => match reg!(ref state o)
-						.set_index(reg!(ref state i), reg!(ref state r).clone())
-					{
-						Ok(v) => v,
-						Err(e) => return Ok(Err(e)),
-					},
+					SetIndex(r, o, i) => {
+						// TODO something funky is going on with this function wrt performance, needs investigation.
+						reg!(ref state o).set_index(reg!(ref state i), reg!(ref state r).clone())?
+					}
 				}
 			} else {
-				break Err(RunError::IpOutOfBounds);
+				break Err(err::ip());
 			}
 		};
 
@@ -657,5 +629,66 @@ where
 			}
 		}
 		Ok(())
+	}
+}
+
+impl std::error::Error for RunError {}
+
+impl fmt::Display for RunError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			RunError::IpOutOfBounds => f.write_str("Instruction pointer out of bounds"),
+			RunError::RegisterOutOfBounds => f.write_str("Register out of bounds"),
+			RunError::NoIterator => f.write_str("No iterators in stack"),
+			RunError::LocalOutOfBounds => f.write_str("Local out of bounds"),
+			RunError::UndefinedFunction => f.write_str("Undefined function"),
+			RunError::IncorrectArgumentCount => f.write_str("Bad argument count"),
+			RunError::ArgumentOutOfBounds => f.write_str("Argument out of bounds"),
+			RunError::IncompatibleType => f.write_str("Type is not compatible"),
+			RunError::NotBoolean => f.write_str("Type is not boolean"),
+		}
+	}
+}
+
+pub(super) mod err {
+	use super::RunError;
+	use std::error::Error;
+
+	type E = Box<dyn Error>;
+
+	#[inline(never)]
+	#[cold]
+	pub fn ip() -> E {
+		Box::new(RunError::IpOutOfBounds)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn roob() -> E {
+		Box::new(RunError::RegisterOutOfBounds)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn arg_count() -> E {
+		Box::new(RunError::IncorrectArgumentCount)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn arg_oob() -> E {
+		Box::new(RunError::ArgumentOutOfBounds)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn boolean() -> E {
+		Box::new(RunError::NotBoolean)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn loob() -> E {
+		Box::new(RunError::LocalOutOfBounds)
 	}
 }

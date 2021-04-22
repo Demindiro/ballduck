@@ -7,7 +7,7 @@ use ansi_term::Color;
 use ballscript::specialized::CopyVariant as Variant;
 #[cfg(not(feature = "copy-variant"))]
 use ballscript::Variant;
-use ballscript::{CallError, Environment, ParseError};
+use ballscript::{Environment, ParseError};
 use rustc_hash::FxHashSet;
 use std::{env, fs, io, process};
 
@@ -33,7 +33,7 @@ pub fn main() {
 							_ => 0,
 						},
 						Err(e) => {
-							print_call_error(e);
+							print_call_error(e.as_ref());
 							1
 						}
 					}
@@ -125,8 +125,8 @@ fn print_parse_error(error: ParseError) -> io::Result<()> {
 }
 
 #[cold]
-fn print_call_error(error: CallError) {
-	eprintln!("An error was thrown: {:?}", error);
+fn print_call_error(error: &dyn std::error::Error) {
+	eprintln!("An error was thrown: {}", error);
 }
 
 #[cfg(feature = "print-instructions")]

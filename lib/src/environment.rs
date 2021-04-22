@@ -47,6 +47,6 @@ where
 	pub fn call(&self, func: &str, args: &[&V]) -> CallResult<V> {
 		self.functions
 			.get(func)
-			.ok_or(CallError::UndefinedFunction)?(args)
+			.ok_or_else(CallError::undefined_function)?(args)
 	}
 }

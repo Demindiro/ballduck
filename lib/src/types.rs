@@ -65,23 +65,17 @@ where
 
 macro_rules! borrow {
 	($self:ident) => {
-		$self
-			.0
-			.try_borrow()
-			.map_err(|_| CallError::AlreadyBorrowed)?
+		$self.0.try_borrow()?
 	};
 	(mut $self:ident) => {
-		$self
-			.0
-			.try_borrow_mut()
-			.map_err(|_| CallError::AlreadyBorrowed)?
+		$self.0.try_borrow_mut()?
 	};
 }
 
 macro_rules! check_arg_count {
 	($args:ident, $count:expr) => {
 		if $args.len() != $count {
-			return Err(CallError::BadArgumentCount);
+			return Err(CallError::bad_argument_count());
 		}
 	};
 }
@@ -131,7 +125,7 @@ where
 				check_arg_count!(args, 0);
 				Ok(borrow!(mut self).pop().unwrap_or(V::default()))
 			}
-			_ => Err(CallError::UndefinedFunction),
+			_ => Err(CallError::undefined_function()),
 		}
 	}
 
@@ -141,9 +135,9 @@ where
 			borrow!(self)
 				.get(v as usize)
 				.cloned()
-				.ok_or(CallError::BadArgument)
+				.ok_or_else(CallError::bad_argument)
 		} else {
-			Err(CallError::BadArgument)
+			Err(CallError::bad_argument())
 		}
 	}
 
@@ -153,9 +147,9 @@ where
 			borrow!(mut self)
 				.get_mut(v as usize)
 				.map(|v| *v = value)
-				.ok_or(CallError::BadArgument)
+				.ok_or_else(CallError::bad_argument)
 		} else {
-			Err(CallError::BadArgument)
+			Err(CallError::bad_argument())
 		}
 	}
 
@@ -226,7 +220,7 @@ where
 				let key = VariantOrd::from_variant(args[0].clone())?;
 				Ok(borrow!(mut self).remove(&key).unwrap_or(V::default()))
 			}
-			_ => Err(CallError::UndefinedFunction),
+			_ => Err(CallError::undefined_function()),
 		}
 	}
 
@@ -237,7 +231,7 @@ where
 		borrow!(self)
 			.get(&key)
 			.cloned()
-			.ok_or(CallError::BadArgument)
+			.ok_or_else(CallError::bad_argument)
 	}
 
 	#[inline]

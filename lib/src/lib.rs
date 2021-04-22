@@ -22,13 +22,13 @@ mod variant;
 
 pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};
 pub use environment::Environment;
-pub use script::{CallError, Class, Instance, ScriptObject, ScriptType};
+pub use script::{Class, Instance, ScriptObject, ScriptType};
 pub use types::{Array, Dictionary};
 pub use variant::specialized;
 pub use variant::{Variant, VariantType};
 
 use bytecode::{ByteCodeBuilder, ByteCodeError};
-use script::Script;
+use script::{CallError, Script};
 use tokenizer::TokenStream;
 
 use core::fmt;

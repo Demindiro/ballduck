@@ -2,13 +2,14 @@
 //
 // This file is licensed under the MIT license. See script/LICENSE for details.
 
-use crate::bytecode::{ByteCode, CallResult, RunError};
+use crate::bytecode::{ByteCode, CallResult};
 use crate::std_types::*;
 use crate::Rc;
 use crate::{Environment, Tracer, VariantType};
 use core::any::{Any, TypeId};
 use core::cell::RefCell;
 use core::fmt;
+use std::error::Error;
 
 pub struct Class<V, T>(Arc<Script<V, T>>)
 where
@@ -76,16 +77,13 @@ where
 }
 
 #[derive(Debug)]
-pub enum CallError {
+pub(crate) enum CallError {
 	UndefinedFunction,
 	BadArgument,
 	BadArgumentCount,
-	RunError(RunError),
 	/// This is specifically intended for operations on `()` AKA "null"
 	IsEmpty,
-	InvalidOperator,
 	IncompatibleType,
-	AlreadyBorrowed,
 }
 
 pub trait ScriptType<V>: 'static
@@ -109,13 +107,13 @@ where
 	#[inline]
 	fn index(&self, index: &V) -> CallResult<V> {
 		let _ = index;
-		Err(CallError::IncompatibleType)
+		Err(CallError::incompatible_type())
 	}
 
 	#[inline]
 	fn set_index(&self, index: &V, value: V) -> CallResult<()> {
 		let _ = (index, value);
-		Err(CallError::IncompatibleType)
+		Err(CallError::incompatible_type())
 	}
 
 	#[inline]
@@ -125,7 +123,7 @@ where
 
 	#[inline]
 	fn iter(&self) -> CallResult<Box<dyn Iterator<Item = V>>> {
-		Err(CallError::IncompatibleType)
+		Err(CallError::incompatible_type())
 	}
 }
 
@@ -173,15 +171,12 @@ where
 		args: &[&V],
 		env: &Environment<V>,
 	) -> CallResult<V> {
-		if let Some(&function) = self.function_map.get(function) {
-			let function = &self.functions[function as usize];
-			match function.run(object, &self.functions, locals, args, &env, &self.tracer) {
-				Ok(e) => e,
-				Err(e) => Err(CallError::RunError(e)),
-			}
-		} else {
-			Err(CallError::UndefinedFunction)
-		}
+		let func = self
+			.function_map
+			.get(function)
+			.ok_or_else(CallError::undefined_function)?;
+		let function = &self.functions[*func as usize];
+		function.run(object, &self.functions, locals, args, &env, &self.tracer)
 	}
 }
 
@@ -222,12 +217,9 @@ where
 		args: &[&V],
 		env: &Environment<V>,
 	) -> CallResult<V> {
-		if let Ok(mut vars) = self.variables.try_borrow_mut() {
-			self.script
-				.call_traced(object, function, &mut vars, args, env)
-		} else {
-			Err(CallError::AlreadyBorrowed)
-		}
+		let mut vars = self.variables.try_borrow_mut()?;
+		self.script
+			.call_traced(object, function, &mut vars, args, env)
 	}
 }
 
@@ -251,5 +243,51 @@ where
 {
 	pub fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V> {
 		self.0.call_self(self, function, args, env)
+	}
+}
+
+impl Error for CallError {}
+
+impl fmt::Display for CallError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			CallError::UndefinedFunction => f.write_str("Undefined function"),
+			CallError::BadArgumentCount => f.write_str("Bad argument count"),
+			CallError::IncompatibleType => f.write_str("Type is not compatible"),
+			CallError::IsEmpty => f.write_str("Type is none"),
+			CallError::BadArgument => f.write_str("Bad argument type"),
+		}
+	}
+}
+
+impl CallError {
+	#[inline(never)]
+	#[cold]
+	pub fn incompatible_type() -> Box<dyn Error> {
+		Box::new(CallError::IncompatibleType)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn empty() -> Box<dyn Error> {
+		Box::new(CallError::IsEmpty)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn undefined_function() -> Box<dyn Error> {
+		Box::new(CallError::UndefinedFunction)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn bad_argument_count() -> Box<dyn Error> {
+		Box::new(CallError::BadArgumentCount)
+	}
+
+	#[inline(never)]
+	#[cold]
+	pub fn bad_argument() -> Box<dyn Error> {
+		Box::new(CallError::BadArgument)
 	}
 }
