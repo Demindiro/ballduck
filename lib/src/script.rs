@@ -15,7 +15,20 @@ where
 	V: VariantType,
 	T: Tracer<V>;
 
-pub type ScriptObject<V> = Rc<dyn ScriptType<V>>;
+#[derive(Clone)]
+pub struct ScriptObject<V>(pub(crate) Rc<dyn ScriptType<V>>)
+where
+	V: VariantType;
+
+impl<V> core::ops::Deref for ScriptObject<V>
+where
+	V: VariantType,
+{
+	type Target = Rc<dyn ScriptType<V>>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 #[derive(Debug)]
 pub(crate) struct Script<V, T>

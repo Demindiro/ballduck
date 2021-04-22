@@ -10,7 +10,7 @@ pub use tracer::Tracer;
 
 use crate::script::CallError;
 use crate::std_types::*;
-use crate::{Array, Dictionary, Environment, VariantType};
+use crate::{Array, Dictionary, Environment, ScriptObject, VariantType};
 use core::fmt::{self, Debug, Formatter};
 use core::intrinsics::unlikely;
 use core::mem;
@@ -485,11 +485,12 @@ where
 					}
 					Move(d, s) => reg!(mut state d) = reg!(ref state s).clone(),
 					NewArray(r, c) => {
-						reg!(mut state r) = V::new_object(Rc::new(Array::with_len(*c)))
+						reg!(mut state r) =
+							V::new_object(ScriptObject(Rc::new(Array::with_len(*c))))
 					}
 					NewDictionary(r, c) => {
 						let d = Rc::new(Dictionary::with_capacity(*c));
-						reg!(mut state r) = V::new_object(d);
+						reg!(mut state r) = V::new_object(ScriptObject(d));
 					}
 					GetIndex(r, o, i) => {
 						reg!(mut state r) = reg!(ref state o)
