@@ -20,6 +20,16 @@ pub struct ScriptObject<V>(pub(crate) Rc<dyn ScriptType<V>>)
 where
 	V: VariantType;
 
+impl<V> ScriptObject<V>
+where
+	V: VariantType,
+{
+	#[inline(always)]
+	pub fn new(rc: Rc<dyn ScriptType<V>>) -> Self {
+		Self(rc)
+	}
+}
+
 impl<V> core::ops::Deref for ScriptObject<V>
 where
 	V: VariantType,
@@ -83,7 +93,13 @@ where
 	V: VariantType,
 {
 	/// Calls the method with the given name on this script instance
-	fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V>;
+	fn call_self(
+		&self,
+		object: &ScriptObject<V>,
+		function: &str,
+		args: &[&V],
+		env: &Environment<V>,
+	) -> CallResult<V>;
 
 	#[inline]
 	fn type_id(&self) -> TypeId {
@@ -151,6 +167,7 @@ where
 
 	fn call_traced(
 		&self,
+		object: &ScriptObject<V>,
 		function: &str,
 		locals: &mut [V],
 		args: &[&V],
@@ -158,9 +175,10 @@ where
 	) -> CallResult<V> {
 		if let Some(&function) = self.function_map.get(function) {
 			let function = &self.functions[function as usize];
-			function
-				.run(&self.functions, locals, args, &env, &self.tracer)
-				.map_err(CallError::RunError)
+			match function.run(object, &self.functions, locals, args, &env, &self.tracer) {
+				Ok(e) => e,
+				Err(e) => Err(CallError::RunError(e)),
+			}
 		} else {
 			Err(CallError::UndefinedFunction)
 		}
@@ -172,13 +190,13 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	pub fn instance(&self) -> Instance<V, T> {
+	pub fn instance(&self) -> ScriptObject<V> {
 		let mut locals = Vec::new();
 		locals.resize(self.0.locals.len(), V::default());
-		Instance {
+		ScriptObject::new(Rc::new(Instance {
 			script: self.0.clone(),
 			variables: RefCell::new(locals.into_boxed_slice()),
-		}
+		}))
 	}
 }
 
@@ -197,9 +215,16 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V> {
+	fn call_self(
+		&self,
+		object: &ScriptObject<V>,
+		function: &str,
+		args: &[&V],
+		env: &Environment<V>,
+	) -> CallResult<V> {
 		if let Ok(mut vars) = self.variables.try_borrow_mut() {
-			self.script.call_traced(function, &mut vars, args, env)
+			self.script
+				.call_traced(object, function, &mut vars, args, env)
 		} else {
 			Err(CallError::AlreadyBorrowed)
 		}
@@ -217,5 +242,14 @@ where
 		} else {
 			write!(f, "{:?}", self.0.functions)
 		}
+	}
+}
+
+impl<V> ScriptObject<V>
+where
+	V: VariantType,
+{
+	pub fn call(&self, function: &str, args: &[&V], env: &Environment<V>) -> CallResult<V> {
+		self.0.call_self(self, function, args, env)
 	}
 }

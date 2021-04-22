@@ -7,7 +7,7 @@ use ansi_term::Color;
 use ballscript::specialized::CopyVariant as Variant;
 #[cfg(not(feature = "copy-variant"))]
 use ballscript::Variant;
-use ballscript::{CallError, Environment, ParseError, ScriptType};
+use ballscript::{CallError, Environment, ParseError};
 use rustc_hash::FxHashSet;
 use std::{env, fs, io, process};
 

@@ -71,6 +71,9 @@ pub enum Instruction {
 	Store(u16, u16),
 	Load(u16, u16),
 	Move(u16, u16),
+	CopySelf {
+		dest: u16,
+	},
 
 	NewArray(u16, usize),
 	NewDictionary(u16, usize),
@@ -103,7 +106,6 @@ pub enum RunError {
 	RegisterOutOfBounds,
 	NoIterator,
 	UndefinedFunction,
-	CallError(Box<CallError>),
 	IncorrectArgumentCount,
 	ArgumentOutOfBounds,
 	IncompatibleType,
@@ -141,10 +143,27 @@ macro_rules! reg {
 
 macro_rules! run_op {
 	($state:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		reg!(mut $state $r) = (reg!(ref $state $a).$op(reg!(ref $state $b))).map_err(err::call)?;
+		{
+			// This allows the compiler to do the 3 registers checks in one go
+			if *$r as usize >= $state.vars.len() {
+				return Err(RunError::RegisterOutOfBounds);
+			}
+			match reg!(ref $state $a).$op(reg!(ref $state $b)) {
+				Ok(v) => reg!(mut $state $r) = v,
+				Err(e) => return Ok(Err(e)),
+			}
+		}
 	};
 	($state:ident, $r:ident = $a:ident $op:tt) => {
-		reg!(mut $state $r) = reg!(ref $state $a).$op().map_err(err::call)?;
+		{
+			if *$r as usize >= $state.vars.len() {
+				return Err(RunError::RegisterOutOfBounds);
+			}
+			match reg!(ref $state $a).$op() {
+				Ok(v) => reg!(mut $state $r) = v,
+				Err(e) => return Ok(Err(e)),
+			}
+		}
 	};
 }
 
@@ -160,12 +179,13 @@ where
 {
 	pub(crate) fn run<T>(
 		&self,
+		object: &ScriptObject<V>,
 		functions: &[Self],
 		locals: &mut [V],
 		args: &[&V],
 		env: &Environment<V>,
 		tracer: &T,
-	) -> Result<V, RunError>
+	) -> Result<CallResult<V>, RunError>
 	where
 		T: Tracer<V>,
 	{
@@ -201,20 +221,6 @@ where
 		} else {
 			&mut stack_vars[..]
 		};
-
-		/*
-		let vars_len = self.var_count as usize + self.consts.len();
-		let mut vars = Vec::with_capacity(vars_len);
-		vars.extend(args.iter().copied().cloned());
-		vars.resize_with(self.var_count as usize, || V::default());
-		vars.extend(self.consts.iter().cloned());
-		let vars = &mut vars[..];
-		*/
-
-		// This version is faster but obviously not as safe
-		// The "zero-cost" abstractions turned out to be slower, so there is some
-		// manual work involved now.
-		// Hopefully the safe version will be as fast as this eventually.
 
 		// Initializes all elements from 0 to args.len()
 		for (i, v) in args
@@ -292,7 +298,10 @@ where
 						// Perform call
 						let obj = reg!(ref state reg);
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = obj.call(func, ca, env).map_err(err::call)?;
+						let r = match obj.call(func, ca, env) {
+							Ok(v) => v,
+							Err(e) => return Ok(Err(e)),
+						};
 						mem::drop(trace_call);
 
 						// Store return value
@@ -317,7 +326,10 @@ where
 
 						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = env.call(func, ca).map_err(err::call)?;
+						let r = match env.call(func, ca) {
+							Ok(v) => v,
+							Err(e) => return Ok(Err(e)),
+						};
 						mem::drop(trace_call);
 
 						// Store return value
@@ -347,8 +359,13 @@ where
 							.ok_or(RunError::UndefinedFunction)?;
 						#[cfg(feature = "unsafe-loop")]
 						let r = unsafe { functions.get_unchecked(*func as usize) };
+
 						let trace_call = TraceSelfCall::new(tracer, self, *func);
-						let r = r.run(functions, locals, ca, env, tracer)?;
+						let r = match r.run(object, functions, locals, ca, env, tracer) {
+							Err(e) => return Err(e),
+							Ok(Err(e)) => return Ok(Err(e)),
+							Ok(Ok(v)) => v,
+						};
 						mem::drop(trace_call);
 
 						// Store return value
@@ -356,11 +373,14 @@ where
 							reg!(mut state reg) = r;
 						}
 					}
-					RetSome(reg) => break Ok(mem::take(reg!(ref mut state reg))),
-					RetNone => break Ok(V::default()),
+					RetSome(reg) => break Ok(Ok(mem::take(reg!(ref mut state reg)))),
+					RetNone => break Ok(Ok(V::default())),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = reg!(ref state iter);
-						let mut iter = iter.iter().map_err(err::call)?;
+						let mut iter = match iter.iter() {
+							Ok(v) => v,
+							Err(e) => return Ok(Err(e)),
+						};
 						if let Some(e) = iter.next() {
 							reg!(mut state reg) = e;
 							iterators.push(iter);
@@ -484,6 +504,7 @@ where
 							.clone();
 					}
 					Move(d, s) => reg!(mut state d) = reg!(ref state s).clone(),
+					CopySelf { dest } => reg!(mut state dest) = V::new_object(object.clone()),
 					NewArray(r, c) => {
 						reg!(mut state r) =
 							V::new_object(ScriptObject(Rc::new(Array::with_len(*c))))
@@ -493,13 +514,17 @@ where
 						reg!(mut state r) = V::new_object(ScriptObject(d));
 					}
 					GetIndex(r, o, i) => {
-						reg!(mut state r) = reg!(ref state o)
-							.index(reg!(ref state i))
-							.map_err(err::call)?
+						reg!(mut state r) = match reg!(ref state o).index(reg!(ref state i)) {
+							Ok(v) => v,
+							Err(e) => return Ok(Err(e)),
+						}
 					}
-					SetIndex(r, o, i) => reg!(ref state o)
+					SetIndex(r, o, i) => match reg!(ref state o)
 						.set_index(reg!(ref state i), reg!(ref state r).clone())
-						.map_err(err::call)?,
+					{
+						Ok(v) => v,
+						Err(e) => return Ok(Err(e)),
+					},
 				}
 			} else {
 				break Err(RunError::IpOutOfBounds);
@@ -570,6 +595,7 @@ impl Debug for Instruction {
 			Store(r, a) => write!(f, "store   {}, {}", r, a),
 			Load(r, a) => write!(f, "load    {}, {}", r, a),
 			Move(a, b) => write!(f, "move    {}, {}", a, b),
+			CopySelf { dest } => write!(f, "cpyself {}", dest),
 
 			NewArray(r, c) => write!(f, "newarr  {}, {}", r, c),
 			NewDictionary(r, c) => write!(f, "newdict {}, {}", r, c),
@@ -631,15 +657,5 @@ where
 			}
 		}
 		Ok(())
-	}
-}
-
-mod err {
-	use super::*;
-
-	#[inline(never)]
-	#[cold]
-	pub fn call(e: CallError) -> RunError {
-		RunError::CallError(Box::new(e))
 	}
 }

@@ -176,6 +176,7 @@ where
 					| IterIntJmp(_, _)
 					| Jmp(_)
 					| RetNone
+					| CopySelf { .. }
 					| NewArray(_, _)
 					| NewDictionary(_, _) => (),
 				}

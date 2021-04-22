@@ -9,7 +9,7 @@
 
 use crate::std_types::hash_map;
 use crate::Rc;
-use crate::{CallError, CallResult, Environment, ScriptType, VariantType};
+use crate::{CallError, CallResult, Environment, ScriptObject, ScriptType, VariantType};
 use core::cell::{Ref, RefCell};
 use core::{fmt, mem};
 
@@ -109,7 +109,13 @@ impl<V> ScriptType<V> for Array<V>
 where
 	V: VariantType,
 {
-	fn call(&self, function: &str, args: &[&V], _: &Environment<V>) -> CallResult<V> {
+	fn call_self(
+		&self,
+		_: &ScriptObject<V>,
+		function: &str,
+		args: &[&V],
+		_: &Environment<V>,
+	) -> CallResult<V> {
 		match function {
 			"len" => {
 				check_arg_count!(args, 0);
@@ -196,7 +202,13 @@ impl<V> ScriptType<V> for Dictionary<V>
 where
 	V: VariantType,
 {
-	fn call(&self, function: &str, args: &[&V], _: &Environment<V>) -> CallResult<V> {
+	fn call_self(
+		&self,
+		_: &ScriptObject<V>,
+		function: &str,
+		args: &[&V],
+		_: &Environment<V>,
+	) -> CallResult<V> {
 		match function {
 			"len" => {
 				check_arg_count!(args, 0);
