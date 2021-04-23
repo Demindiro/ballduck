@@ -45,15 +45,7 @@ pub(crate) enum Statement<'src> {
 	Assign {
 		line: u32,
 		column: u32,
-		var: &'src str,
-		assign_op: AssignOp,
-		expr: Expression<'src>,
-	},
-	AssignIndex {
-		line: u32,
-		column: u32,
-		var: &'src str,
-		index: Expression<'src>,
+		var: Expression<'src>,
 		assign_op: AssignOp,
 		expr: Expression<'src>,
 	},
@@ -264,62 +256,22 @@ impl<'src> Function<'src> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
-				Some(Token::_Self) | Some(Token::Env) => {
+				Some(Token::_Self) | Some(Token::Env) | Some(Token::Name(_)) => {
 					let (line, column) = tokens.position();
 					tokens.prev();
 					let expr = Expression::parse(tokens)?;
-					lines.push(Statement::Expression { expr, line, column });
-				}
-				Some(Token::Name(name)) => {
-					let (line, column) = tokens.position();
 					match tokens.next() {
-						Some(Token::BracketRoundOpen) => {
-							tokens.prev();
-							tokens.prev();
-							let (line, column) = tokens.position();
+						Some(Token::Assign(assign_op)) => {
+							let var = expr;
 							let expr = Expression::parse(tokens)?;
-							lines.push(Statement::Expression { expr, line, column });
-						}
-						Some(Token::BracketSquareOpen) => {
-							let expr = Expression::new_name(name, tokens);
-							let (line, column) = tokens.position();
-							let expr = Expression::parse_index_op(expr, tokens)?;
-							if let Some(Token::Assign(assign_op)) = tokens.next() {
-								if let Expression::Operation { right, .. } = expr {
-									lines.push(Statement::AssignIndex {
-										var: name,
-										index: *right,
-										assign_op,
-										expr: Expression::parse(tokens)?,
-										line,
-										column,
-									});
-								} else {
-									unreachable!();
-								}
-							} else {
+							lines.push(Statement::Assign { line, column, var, assign_op, expr });
+						} 
+						tk => {
+							lines.push(Statement::Expression { line, column, expr });
+							if let Some(_) = tk {
 								tokens.prev();
-								lines.push(Statement::Expression { expr, line, column });
 							}
 						}
-						Some(Token::Assign(op)) => lines.push(Statement::Assign {
-							var: name,
-							assign_op: op,
-							expr: Expression::parse(tokens)?,
-							line,
-							column,
-						}),
-						Some(Token::Op(op)) => match op {
-							Op::Access => {
-								tokens.prev();
-								tokens.prev();
-								let (line, column) = tokens.position();
-								let expr = Expression::parse(tokens)?;
-								lines.push(Statement::Expression { expr, line, column });
-							}
-							_ => todo(tokens, line!())?,
-						},
-						_ => todo(tokens, line!())?,
 					}
 				}
 				Some(Token::For) => {
@@ -452,6 +404,7 @@ impl<'src> Function<'src> {
 						None => err!(UnexpectedEOF, tokens),
 					};
 					lines.push(Statement::Declare { var, line, column });
+					let var = Expression::new_name(var, tokens);
 					match tokens.next() {
 						Some(Token::Assign(assign_op)) => match assign_op {
 							AssignOp::None => {
@@ -638,7 +591,7 @@ impl<'src> Expression<'src> {
 									)),
 								}
 							}
-							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) => {
+							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) | Some(Token::Assign(_)) => {
 								tokens.prev();
 								Ok(Self::new_op(lhs, opl, mid, tokens))
 							}
@@ -699,7 +652,8 @@ impl<'src> Expression<'src> {
 				| Token::Comma
 				| Token::Colon
 				| Token::To
-				| Token::Step => {
+				| Token::Step
+				| Token::Assign(_) => {
 					tokens.prev();
 					Ok(lhs)
 				}
