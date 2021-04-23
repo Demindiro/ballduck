@@ -1,16 +1,16 @@
 fn main()
-	print("Dictionary construction:")
+	env.print("Dictionary construction:")
 	var dict = {1: 2, 3: "dog", "cat": "chicken"}
-	print("  ", dict)
+	env.print("  ", dict)
 
-	print("Setting dictionary index:")
+	env.print("Setting dictionary index:")
 	dict[1] = "duck"
-	print("  ", dict)
+	env.print("  ", dict)
 
-	print("Iterating dictionaries:")
+	env.print("Iterating dictionaries:")
 	for k in dict
-		print("  ", k, ": ", dict[k])
+		env.print("  ", k, ": ", dict[k])
 
-	print("Using dictionary elements in expressions:")
+	env.print("Using dictionary elements in expressions:")
 	var sum = dict[3] + " is not a " + dict["cat"]
-	print("  ", sum)
+	env.print("  ", sum)

@@ -5,7 +5,7 @@ fn main()
 	var y = 0
 	while x < to_x
 		while y < to_y
-			print(x, " ", y)
+			env.print(x, " ", y)
 			y = y + 1
 		y = 0
 		x = x + 1

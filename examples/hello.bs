@@ -1,2 +1,2 @@
 fn main()
-	print("Hello, world!")
+	env.print("Hello, world!")

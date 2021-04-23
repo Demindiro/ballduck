@@ -5,6 +5,8 @@ OUTPUT_DEBUG?=target/debug/bs
 
 default: test
 
+test-examples: run-array run-dictionary run-fizzbuzz run-iter_str run-sort-selection run-vec2 run-count run-factorial run-hello run-locals run-sieve run-vars run-while
+
 watch-run-%:
 	cargo watch -c -x "run $$PWD/examples/$*.bs"
 
@@ -23,8 +25,6 @@ vg-run-%:
 run-unsafe-%:
 	cargo build --release --features unsafe-loop
 	bash -c 'time $(OUTPUT) $$PWD/examples/$*.bs'
-
-run-examples: run-hello run-factorial run-fizzbuzz run-count run-vec2
 
 watch-test:
 	cargo watch -c -x 'test'

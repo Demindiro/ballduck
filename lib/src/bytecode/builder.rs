@@ -47,6 +47,8 @@ pub enum ByteCodeErrorType<'a> {
 	UnexpectedBreak(),
 	UnexpectedContinue(),
 	TooManyRegisters(),
+	Unsupported(&'a str),
+	UndefinedFunction(&'a str),
 }
 
 macro_rules! err {
@@ -656,6 +658,12 @@ where
 				Ok(None)
 			}
 			Expression::Atom { atom, line, column } => match *atom {
+				Atom::_Self => {
+					let dest = store.expect("No register to store self in");
+					self.instr.push(Instruction::CopySelf { dest });
+					Ok(None)
+				}
+				Atom::Env => todo!(),
 				Atom::Name(name) => {
 					if let Some(&reg) = self.vars.get(name) {
 						Ok(Some(reg))
@@ -684,17 +692,38 @@ where
 			} => {
 				let og_cvc = self.curr_var_count;
 
+				enum Obj {
+					_Self,
+					Env,
+					Some(u16),
+				}
+
 				// Parse expression on which to call the function on
-				let expr = if let Some(expr) = expr {
-					let r = self.alloc_reg(*line, *column)?;
-					Some(if let Some(r) = self.parse_expression(Some(r), expr)? {
-						self.dealloc_reg();
-						r
-					} else {
-						r
-					})
-				} else {
-					None
+				// `_Self` and `Env` are special cases however
+				let expr = match expr {
+					Some(box Expression::Atom {
+						atom: Atom::_Self, ..
+					}) => Obj::_Self,
+					Some(box Expression::Atom {
+						atom: Atom::Env, ..
+					}) => Obj::Env,
+					Some(expr) => {
+						let r = self.alloc_reg(*line, *column)?;
+						Obj::Some(if let Some(r) = self.parse_expression(Some(r), expr)? {
+							self.dealloc_reg();
+							r
+						} else {
+							r
+						})
+					}
+					None => {
+						err!(
+							line,
+							column,
+							Unsupported,
+							"Local functions are not supported yet"
+						);
+					}
 				};
 
 				// Parse arguments
@@ -715,17 +744,21 @@ where
 				});
 				self.max_call_args = self.max_call_args.max(arguments.len() as u16);
 
-				self.instr.push(if let Some(expr) = expr {
-					Instruction::Call(expr, ca)
-				} else if let Some(&func) = self.methods.get(&name[..]) {
-					let ca = Box::new(SelfCallArgs {
-						store_in: ca.store_in,
-						func,
-						args: ca.args,
-					});
-					Instruction::CallSelf(ca)
-				} else {
-					Instruction::CallGlobal(ca)
+				self.instr.push(match expr {
+					Obj::Some(expr) => Instruction::Call(expr, ca),
+					Obj::_Self => {
+						if let Some(&func) = self.methods.get(&name[..]) {
+							let ca = Box::new(SelfCallArgs {
+								store_in: ca.store_in,
+								func,
+								args: ca.args,
+							});
+							Instruction::CallSelf(ca)
+						} else {
+							err!(line, column, UndefinedFunction, name);
+						}
+					}
+					Obj::Env => Instruction::CallGlobal(ca),
 				});
 				self.min_var_count = self.min_var_count.max(self.curr_var_count);
 				self.curr_var_count = og_cvc;
@@ -930,19 +963,24 @@ impl fmt::Display for ByteCodeError<'_> {
 		use fmt::Write;
 		let mut w = |s, v| {
 			f.write_str(s)?;
-			f.write_str(" '")?;
-			f.write_str(v)?;
-			f.write_char('\'')
+			if v != "" {
+				f.write_str(" '")?;
+				f.write_str(v)?;
+				f.write_char('\'')?;
+			}
+			Ok(())
 		};
 		match &self.error {
 			ByteCodeErrorType::UndefinedVariable(v) => w("Undefined variable", v),
 			ByteCodeErrorType::DuplicateVariable(v) => w("Duplicate variable", v),
 			ByteCodeErrorType::DuplicateParameter(v) => w("Duplicate parameter", v),
-			ByteCodeErrorType::UnexpectedBreak() => w("Unexpected 'break'", ""),
-			ByteCodeErrorType::UnexpectedContinue() => w("Unexpected 'continue'", ""),
+			ByteCodeErrorType::UnexpectedBreak() => w("Unexpected ", "break"),
+			ByteCodeErrorType::UnexpectedContinue() => w("Unexpected ", "continue"),
 			&ByteCodeErrorType::TooManyRegisters() => {
 				w("Too many registers allocated (use less variables!)", "")
 			}
+			ByteCodeErrorType::Unsupported(v) => w(v, ""),
+			ByteCodeErrorType::UndefinedFunction(v) => w("Undefined function", v),
 		}
 	}
 }

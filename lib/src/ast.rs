@@ -108,6 +108,8 @@ pub(crate) enum Atom<'src> {
 	Integer(Integer),
 	String(&'src str),
 	Bool(bool),
+	_Self,
+	Env,
 }
 
 #[derive(Debug, PartialEq)]
@@ -262,6 +264,12 @@ impl<'src> Function<'src> {
 		let mut lines = Lines::new();
 		loop {
 			match tokens.next() {
+				Some(Token::_Self) | Some(Token::Env) => {
+					let (line, column) = tokens.position();
+					tokens.prev();
+					let expr = Expression::parse(tokens)?;
+					lines.push(Statement::Expression { expr, line, column });
+				}
 				Some(Token::Name(name)) => {
 					let (line, column) = tokens.position();
 					match tokens.next() {
@@ -524,6 +532,22 @@ impl<'src> Expression<'src> {
 				}
 				e
 			}
+			Some(Token::_Self) => {
+				let (line, column) = tokens.position();
+				Self::Atom {
+					line,
+					column,
+					atom: Atom::_Self,
+				}
+			}
+			Some(Token::Env) => {
+				let (line, column) = tokens.position();
+				Self::Atom {
+					line,
+					column,
+					atom: Atom::Env,
+				}
+			}
 			Some(Token::String(s)) => Self::new_str(s, tokens),
 			Some(Token::Number(n)) => Self::new_num(n, tokens)?,
 			Some(tk) if tk == Token::True || tk == Token::False => Self::new_bool(tk, tokens),
@@ -586,14 +610,23 @@ impl<'src> Expression<'src> {
 		if let Some(tk) = tokens.next() {
 			match tk {
 				Token::Op(opl) => match tokens.next() {
-					Some(Token::Name(mid)) => {
-						let og_mid = mid;
-						let mid = Self::new_name(mid, tokens);
+					Some(Token::Name(_)) | Some(Token::_Self) | Some(Token::Env) => {
+						tokens.prev();
+						let mid = Self::new_atom(tokens.next().unwrap(), tokens)?;
 						match tokens.next() {
 							Some(Token::Op(opr)) => {
 								Self::parse_tri_op_start(lhs, opl, mid, opr, tokens)
 							}
 							Some(Token::BracketRoundOpen) => {
+								let og_mid = if let Self::Atom {
+									atom: Atom::Name(n),
+									..
+								} = mid
+								{
+									n
+								} else {
+									return todo(tokens, line!());
+								};
 								let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
 								match opl {
 									Op::Access => Ok(Self::new_fn(Some(lhs), og_mid, args, tokens)),
@@ -686,9 +719,27 @@ impl<'src> Expression<'src> {
 	) -> Result<Self, Error> {
 		let rhs = match tokens.next() {
 			Some(Token::Name(rhs)) => {
+				let og_rhs = rhs;
 				let rhs = Self::new_name(rhs, tokens);
 				match tokens.next() {
-					Some(Token::BracketRoundOpen) => todo(tokens, line!())?,
+					Some(Token::BracketRoundOpen) => {
+						if opr == Op::Access {
+							let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
+							let f = Self::new_fn(Some(mid), og_rhs, args, tokens);
+							match tokens.next() {
+								Some(Token::Op(opr)) => {
+									return Self::parse_tri_op_start(lhs, opl, f, opr, tokens);
+								}
+								None
+								| Some(Token::BracketRoundClose)
+								| Some(Token::BracketSquareClose)
+								| Some(Token::BracketCurlyClose) => return Ok(Self::new_op(lhs, opl, f, tokens)),
+								Some(tk) => err!(UnexpectedToken, tk, tokens),
+							}
+						} else {
+							todo(tokens, line!())?
+						}
+					}
 					Some(Token::BracketSquareOpen) => Self::parse_index_op(rhs, tokens)?,
 					Some(_) => {
 						tokens.prev();
@@ -740,6 +791,17 @@ impl<'src> Expression<'src> {
 			line: pos.0,
 			column: pos.1,
 		}
+	}
+
+	fn new_atom(tk: Token<'src>, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
+		let (line, column) = tokens.position();
+		let atom = match tk {
+			Token::_Self => Atom::_Self,
+			Token::Env => Atom::Env,
+			Token::Name(n) => Atom::Name(n),
+			_ => todo(tokens, line!())?,
+		};
+		Ok(Self::Atom { atom, line, column })
 	}
 
 	fn new_name(n: &'src str, tokens: &TokenStream<'src>) -> Self {

@@ -17,4 +17,4 @@ fn main()
 	for i in array.len() step 1
 		var a = array[i]
 		if a
-			print(i)
+			env.print(i)
