@@ -1,0 +1,7 @@
+[book]
+authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
+src = "doc"
+title = "Ballscript guide"
+
+[output.html]
+git-repository-url = "https://github.com/Demindiro/ballscript"

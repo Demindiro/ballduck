@@ -1,12 +1,12 @@
 var local_var
 
 fn main()
-	local_var = "apple"
+	self.local_var = "apple"
 	var x = "apple"
 	var y = "pen"
 	var z = x + y
 	env.print(x, " + ", y, " = ", z)
 	z += "apple"
 	env.print(z)
-	local_var += z
+	self.local_var += z
 	env.print(local_var)
