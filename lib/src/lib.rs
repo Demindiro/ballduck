@@ -35,10 +35,13 @@ use core::fmt;
 
 #[cfg(feature = "std")]
 pub(crate) mod std_types {
-	pub use rustc_hash::{FxHashMap, FxHashSet};
+	use core::hash::BuildHasherDefault;
+	use rustc_hash::FxHasher;
 	pub use std::collections::{hash_map, HashMap, HashSet};
 	pub use std::rc::Rc;
 	pub use std::sync::Arc;
+	pub type FxHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
+	pub type FxHashSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 }
 
 #[cfg(not(feature = "std"))]

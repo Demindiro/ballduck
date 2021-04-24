@@ -40,6 +40,9 @@ watch-test:
 get-size:
 	nm -C --print-size --radix=d $(OUTPUT) | less
 
+get-asm:
+	objdump -S -C $(OUTPUT) | less
+
 test-loop:
 	cargo watch -c -s 'make test'
 

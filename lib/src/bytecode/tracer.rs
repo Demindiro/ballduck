@@ -212,7 +212,12 @@ where
 		instruction: &'a Instruction,
 	) -> Self {
 		tracer.instruction_pre(bytecode, ip, instruction);
-		Self { bytecode, tracer, ip, instruction }
+		Self {
+			bytecode,
+			tracer,
+			ip,
+			instruction,
+		}
 	}
 }
 

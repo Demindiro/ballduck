@@ -26,7 +26,6 @@ where
 	loops: Vec<LoopContext>,
 	const_map: FxHashMap<Constant, u16>,
 	string_map: &'e mut FxHashSet<Rc<str>>,
-	max_call_args: u16,
 }
 
 struct LoopContext {
@@ -99,7 +98,6 @@ where
 			loops: Vec::new(),
 			const_map: HashMap::with_hasher(Default::default()),
 			string_map,
-			max_call_args: 0,
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -130,11 +128,13 @@ where
 							conv(a);
 						}
 					}
-					CallSelf(box SelfCallArgs { args, .. })
-					| CallGlobal(box CallArgs { args, .. }) => {
+					CallGlobal(box CallArgs { args, .. }) => {
 						for a in args.iter_mut() {
 							conv(a);
 						}
+					}
+					CallSelf { args, .. } => {
+						args.iter_mut().for_each(conv);
 					}
 					JmpIf(a, _)
 					| JmpNotIf(a, _)
@@ -192,7 +192,6 @@ where
 			param_count: builder.param_count,
 			consts: builder.consts,
 			name,
-			max_call_args: builder.max_call_args,
 		})
 	}
 
@@ -493,8 +492,8 @@ where
 									} => {
 										if let Some(local) = self.locals.get(var as &str) {
 											let og_cvc = self.curr_var_count;
-											let e = self
-												.parse_expression_new_reg(expr, line, column)?;
+											let e =
+												self.parse_expression_new_reg(expr, line, column)?;
 											if let AssignOp::None = assign_op {
 											} else {
 												let tmp_reg = self.curr_var_count;
@@ -803,18 +802,20 @@ where
 					func: self.map_string(name),
 					args: args.into_boxed_slice(),
 				});
-				self.max_call_args = self.max_call_args.max(ca.args.len() as u16);
 
 				self.instr.push(match expr {
 					Obj::Some(expr) => Instruction::Call(expr, ca),
 					Obj::_Self => {
 						if let Some(&func) = self.methods.get(name) {
-							let ca = Box::new(SelfCallArgs {
+							let mut args = Box::new([0; 16]);
+							for (i, &a) in ca.args.into_iter().enumerate() {
+								args[i] = a;
+							}
+							Instruction::CallSelf {
 								store_in: ca.store_in,
 								func,
-								args: ca.args,
-							});
-							Instruction::CallSelf(ca)
+								args,
+							}
 						} else {
 							err!(line, column, UndefinedFunction, name);
 						}
@@ -926,14 +927,9 @@ where
 
 	fn alloc_reg(&mut self, line: u32, column: u32) -> Result<u16, ByteCodeError<'s>> {
 		let r = self.curr_var_count;
-		self.curr_var_count = self
-			.curr_var_count
-			.checked_add(1)
-			.ok_or_else(|| ByteCodeError::new(
-				line,
-				column,
-				ByteCodeErrorType::TooManyRegisters(),
-			))?;
+		self.curr_var_count = self.curr_var_count.checked_add(1).ok_or_else(|| {
+			ByteCodeError::new(line, column, ByteCodeErrorType::TooManyRegisters())
+		})?;
 		Ok(r)
 	}
 
