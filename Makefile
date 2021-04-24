@@ -7,11 +7,19 @@ default: test
 
 test-examples: run-array run-dictionary run-fizzbuzz run-iter_str run-sort-selection run-vec2 run-count run-factorial run-hello run-locals run-sieve run-vars run-while
 
+build:
+	cargo build --release
+
+build-pgo:
+	rm -rf /tmp/pgo-data
+	RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" make test-examples
+	llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+	RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release
+
 watch-run-%:
 	cargo watch -c -x "run $$PWD/examples/$*.bs"
 
-run-%:
-	cargo build --release
+run-%: build
 	bash -c 'time $(OUTPUT) $$PWD/examples/$*.bs'
 
 run-copy-%:

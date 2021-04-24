@@ -99,6 +99,15 @@ where
 	}
 }
 
+impl<V> Default for Array<V>
+where
+	V: VariantType,
+{
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl<V> ScriptType<V> for Array<V>
 where
 	V: VariantType,
@@ -123,7 +132,7 @@ where
 			// TODO is it fine to default to None?
 			"pop" => {
 				check_arg_count!(args, 0);
-				Ok(borrow!(mut self).pop().unwrap_or(V::default()))
+				Ok(borrow!(mut self).pop().unwrap_or_default())
 			}
 			_ => Err(CallError::undefined_function()),
 		}
@@ -192,6 +201,15 @@ where
 	}
 }
 
+impl<V> Default for Dictionary<V>
+where
+	V: VariantType,
+{
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl<V> ScriptType<V> for Dictionary<V>
 where
 	V: VariantType,
@@ -212,13 +230,13 @@ where
 				check_arg_count!(args, 2);
 				let key = VariantOrd::from_variant(args[0].clone())?;
 				let value = args[1].clone();
-				Ok(borrow!(mut self).insert(key, value).unwrap_or(V::default()))
+				Ok(borrow!(mut self).insert(key, value).unwrap_or_default())
 			}
 			// TODO is it fine to default to None?
 			"remove" => {
 				check_arg_count!(args, 1);
 				let key = VariantOrd::from_variant(args[0].clone())?;
-				Ok(borrow!(mut self).remove(&key).unwrap_or(V::default()))
+				Ok(borrow!(mut self).remove(&key).unwrap_or_default())
 			}
 			_ => Err(CallError::undefined_function()),
 		}
@@ -255,7 +273,7 @@ where
 		for (i, (k, v)) in d.iter().enumerate() {
 			s.extend(format!("{:?}: {:?}", k, v).chars());
 			if i != last {
-				s.extend(", ".chars());
+				s.push_str(", ");
 			}
 		}
 		s.push('}');
@@ -325,7 +343,7 @@ where
 	type Item = V;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().cloned().map(VariantOrd::as_variant)
+		self.iter.next().cloned().map(VariantOrd::into_variant)
 	}
 }
 
@@ -338,7 +356,7 @@ impl VariantOrd {
 			Ok(v) => Self::Bool(v),
 			Err(v) => match v.as_integer() {
 				Ok(v) => Self::Integer(v),
-				Err(_) => match var.as_string() {
+				Err(_) => match var.into_string() {
 					Ok(v) => Self::String(v),
 					Err(_) => return Err(CallError::IncompatibleType),
 				},
@@ -346,7 +364,7 @@ impl VariantOrd {
 		})
 	}
 
-	fn as_variant<V>(self) -> V
+	fn into_variant<V>(self) -> V
 	where
 		V: VariantType,
 	{

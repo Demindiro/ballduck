@@ -34,9 +34,9 @@ where
 
 	fn as_real(&self) -> Result<f64, &Self>;
 
-	fn as_string(self) -> Result<Rc<str>, Self>;
+	fn into_string(self) -> Result<Rc<str>, Self>;
 
-	fn as_object(self) -> Result<ScriptObject<Self>, Self>;
+	fn into_object(self) -> Result<ScriptObject<Self>, Self>;
 
 	fn call(&self, function: &str, args: &[&Self], env: &Environment<Self>) -> CallResult<Self>;
 
@@ -311,7 +311,7 @@ impl VariantType for Variant {
 	}
 
 	#[inline]
-	fn as_string(self) -> Result<Rc<str>, Self> {
+	fn into_string(self) -> Result<Rc<str>, Self> {
 		if let Self::String(b) = self {
 			Ok(b)
 		} else {
@@ -320,7 +320,7 @@ impl VariantType for Variant {
 	}
 
 	#[inline]
-	fn as_object(self) -> Result<ScriptObject<Self>, Self> {
+	fn into_object(self) -> Result<ScriptObject<Self>, Self> {
 		if let Self::Object(b) = self {
 			Ok(b)
 		} else {
@@ -366,9 +366,9 @@ impl VariantType for Variant {
 			Variant::None => Err(CallError::empty()),
 			&Variant::Integer(i) => {
 				if i < 0 {
-					Ok(Box::new((i + 1..=0).rev().map(|i| Variant::Integer(i))))
+					Ok(Box::new((i + 1..=0).rev().map(Variant::Integer)))
 				} else {
-					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
+					Ok(Box::new((0..i).map(Variant::Integer)))
 				}
 			}
 			Variant::String(s) => Ok(Box::new(StringIter::new(s.clone()))),

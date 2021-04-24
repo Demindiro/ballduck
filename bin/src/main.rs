@@ -114,9 +114,9 @@ fn print_parse_error(error: ParseError) -> io::Result<()> {
 					writeln!(writer, "{}", Color::Red.bold().paint("^"))?;
 					break;
 				} else if c == b'\t' {
-					writer.write(b"    ")?;
+					writer.write_all(b"    ")?;
 				} else {
-					writer.write(b" ")?;
+					writer.write_all(b" ")?;
 				}
 			}
 		}

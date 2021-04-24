@@ -264,11 +264,17 @@ impl<'src> Function<'src> {
 						Some(Token::Assign(assign_op)) => {
 							let var = expr;
 							let expr = Expression::parse(tokens)?;
-							lines.push(Statement::Assign { line, column, var, assign_op, expr });
-						} 
+							lines.push(Statement::Assign {
+								line,
+								column,
+								var,
+								assign_op,
+								expr,
+							});
+						}
 						tk => {
 							lines.push(Statement::Expression { line, column, expr });
-							if let Some(_) = tk {
+							if tk.is_some() {
 								tokens.prev();
 							}
 						}
@@ -388,7 +394,7 @@ impl<'src> Function<'src> {
 				Some(Token::Pass) => (),
 				Some(Token::Return) => {
 					let (line, column) = tokens.position();
-					let expr = if let Some(_) = tokens.next() {
+					let expr = if tokens.next().is_some() {
 						tokens.prev();
 						Some(Expression::parse(tokens)?)
 					} else {
@@ -591,7 +597,9 @@ impl<'src> Expression<'src> {
 									)),
 								}
 							}
-							Some(Token::BracketRoundClose) | Some(Token::Indent(_)) | Some(Token::Assign(_)) => {
+							Some(Token::BracketRoundClose)
+							| Some(Token::Indent(_))
+							| Some(Token::Assign(_)) => {
 								tokens.prev();
 								Ok(Self::new_op(lhs, opl, mid, tokens))
 							}
@@ -965,7 +973,7 @@ fn parse_number(s: &str) -> Result<Atom, NumberParseError> {
 	} else {
 		(s.chars(), 10)
 	};
-	if s == "" {
+	if s.is_empty() {
 		Err(NumberParseError::Empty)
 	} else {
 		let mut chars = chars.peekable();

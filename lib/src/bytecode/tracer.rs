@@ -93,7 +93,7 @@ where
 	#[inline(always)]
 	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>) -> Self {
 		tracer.run_pre(bytecode);
-		Self { tracer, bytecode }
+		Self { bytecode, tracer }
 	}
 }
 
@@ -129,8 +129,8 @@ where
 	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>, function: &'a Rc<str>) -> Self {
 		tracer.call_pre(bytecode, function);
 		Self {
-			tracer,
 			bytecode,
+			tracer,
 			function,
 		}
 	}
@@ -168,8 +168,8 @@ where
 	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>, function: u16) -> Self {
 		tracer.call_self_pre(bytecode, function);
 		Self {
-			tracer,
 			bytecode,
+			tracer,
 			function,
 		}
 	}
@@ -212,12 +212,7 @@ where
 		instruction: &'a Instruction,
 	) -> Self {
 		tracer.instruction_pre(bytecode, ip, instruction);
-		Self {
-			tracer,
-			bytecode,
-			ip,
-			instruction,
-		}
+		Self { bytecode, tracer, ip, instruction }
 	}
 }
 

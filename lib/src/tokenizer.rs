@@ -149,17 +149,15 @@ impl Token<'_> {
 				' ' | '\t' if (c != '\t' || !start_of_file) => continue,
 				'\n' | '\t' => {
 					let s = if c == '\t' { 1 } else { 0 };
-					loop {
-						for i in s.. {
-							return match chars.next() {
-								Some((_, '\t')) => continue,
-								Some((_, ' ')) => Err(TokenError::SpaceInIndent),
-								Some(_) => Ok((Token::Indent(i), start + (i + 1 - s) as u32)),
-								None => Err(TokenError::Empty),
-							};
-						}
-						break Err(TokenError::IndentationOverflow);
+					for i in s.. {
+						return match chars.next() {
+							Some((_, '\t')) => continue,
+							Some((_, ' ')) => Err(TokenError::SpaceInIndent),
+							Some(_) => Ok((Token::Indent(i), start + (i + 1 - s) as u32)),
+							None => Err(TokenError::Empty),
+						};
 					}
+					return Err(TokenError::IndentationOverflow);
 				}
 				// Just ignore it, I can't be arsed with Windows legacy crap
 				'\r' => continue,

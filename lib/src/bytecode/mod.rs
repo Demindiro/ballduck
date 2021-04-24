@@ -193,7 +193,7 @@ where
 		for &a in args.iter() {
 			vars.push(a.clone());
 		}
-		vars.resize_with(self.var_count as usize, || V::default());
+		vars.resize_with(self.var_count as usize, V::default);
 		for c in self.consts.iter() {
 			vars.push(c.clone());
 		}
@@ -243,7 +243,8 @@ where
 							call_args[i] = reg!(ref state a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
-						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+						let ca: &[&V] =
+							unsafe { &*(&call_args[..args.len()] as *const _ as *const _) };
 
 						// Perform call
 						let obj = reg!(ref state reg);
@@ -269,7 +270,8 @@ where
 							call_args[i] = reg!(ref state a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
-						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+						let ca: &[&V] =
+							unsafe { &*(&call_args[..args.len()] as *const _ as *const _) };
 
 						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
@@ -294,7 +296,8 @@ where
 							call_args[i] = reg!(ref state a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
-						let ca: &[&V] = unsafe { mem::transmute(&call_args[..args.len()]) };
+						let ca: &[&V] =
+							unsafe { &*(&call_args[..args.len()] as *const _ as *const _) };
 
 						// Perform call
 						#[cfg(not(feature = "unsafe-loop"))]
@@ -472,7 +475,7 @@ where
 	V: VariantType,
 {
 	pub fn variables(&mut self) -> &mut [V] {
-		&mut self.vars[..]
+		self.vars
 	}
 }
 

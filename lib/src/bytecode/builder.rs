@@ -57,13 +57,13 @@ macro_rules! err {
 		err!($line, $column, $error, )
 	};
 	($line:expr, $column:expr, $error:ident, $($arg:expr)*) => {
-		return Err(ByteCodeError::new(*$line, *$column, ByteCodeErrorType::$error($($arg,)*)));
+		return Err(ByteCodeError::new($line, $column, ByteCodeErrorType::$error($($arg,)*)));
 	};
 	(lazy $line:expr, $column:expr, $error:ident) => {
 		err!(lazy $line, $column, $error, )
 	};
 	(lazy $line:expr, $column:expr, $error:ident, $($arg:expr)*) => {
-		|| { ByteCodeError::new(*$line, *$column, ByteCodeErrorType::$error($($arg,)*)) }
+		|| { ByteCodeError::new($line, $column, ByteCodeErrorType::$error($($arg,)*)) }
 	};
 }
 
@@ -103,17 +103,16 @@ where
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
-				let (line, column) = (&0, &0);
-				err!(line, column, DuplicateParameter, p);
+				err!(0, 0, DuplicateParameter, p);
 			}
 		}
-		builder.parse_block(&function.lines)?;
+		builder.parse_block(function.lines)?;
 		match builder.instr.last() {
 			Some(Instruction::RetSome(_)) | Some(Instruction::RetNone) => (),
 			_ => builder.instr.push(Instruction::RetNone),
 		}
 
-		if builder.consts.len() > 0 {
+		if !builder.consts.is_empty() {
 			// All consts are using the upper-most registers, move them downwards
 			let offset = (u16::MAX - builder.consts.len() as u16).wrapping_add(1);
 			let min_var_count = builder.min_var_count;
@@ -197,7 +196,7 @@ where
 		})
 	}
 
-	fn parse_block(&mut self, lines: &Lines<'s>) -> Result<(), ByteCodeError<'s>> {
+	fn parse_block(&mut self, lines: Lines<'s>) -> Result<(), ByteCodeError<'s>> {
 		let mut frame_vars = Vec::new();
 		for line in lines {
 			match line {
@@ -214,7 +213,7 @@ where
 					column,
 				} => {
 					let og_cvc = self.curr_var_count;
-					let (l, c) = (*line, *column);
+					let (l, c) = (line, column);
 
 					// Parse `to` expression
 					let iter_reg = self.alloc_reg(l, c)?;
@@ -305,7 +304,7 @@ where
 					}
 
 					// Insert `IterJmp` instruction & update the `Iter` with the end address.
-					if let None = from_step {
+					if from_step.is_none() {
 						self.instr.push(Instruction::IterJmp(var_reg, ip));
 						let ip = self.instr.len() as u32;
 						match self.instr.get_mut(ic) {
@@ -483,10 +482,10 @@ where
 							right,
 							line,
 							column,
-						} => match left.as_ref() {
+						} => match *left {
 							Expression::Atom { atom, line, column } => match atom {
 								Atom::Name(n) => todo!("{}", n),
-								Atom::_Self => match right.as_ref() {
+								Atom::_Self => match *right {
 									Expression::Atom {
 										atom: Atom::Name(var),
 										line,
@@ -494,7 +493,8 @@ where
 									} => {
 										if let Some(local) = self.locals.get(var as &str) {
 											let og_cvc = self.curr_var_count;
-											let e = self.parse_expression_new_reg(expr, *line, *column)?;
+											let e = self
+												.parse_expression_new_reg(expr, line, column)?;
 											if let AssignOp::None = assign_op {
 											} else {
 												let tmp_reg = self.curr_var_count;
@@ -570,9 +570,9 @@ where
 							column,
 						} => {
 							let og_cvc = self.curr_var_count;
-							let left = self.parse_expression_new_reg(left, *line, *column)?;
-							let right = self.parse_expression_new_reg(right, *line, *column)?;
-							let expr = self.parse_expression_new_reg(expr, *line, *column)?;
+							let left = self.parse_expression_new_reg(*left, line, column)?;
+							let right = self.parse_expression_new_reg(*right, line, column)?;
+							let expr = self.parse_expression_new_reg(expr, line, column)?;
 							self.update_min_vars();
 							self.instr.push(Instruction::SetIndex(expr, left, right));
 							self.curr_var_count = og_cvc;
@@ -602,7 +602,7 @@ where
 					line,
 					column,
 				} => {
-					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
+					let i = self.loops.len().wrapping_sub(levels as usize + 1);
 					let c = self
 						.loops
 						.get_mut(i)
@@ -615,7 +615,7 @@ where
 					line,
 					column,
 				} => {
-					let i = self.loops.len().wrapping_sub(*levels as usize + 1);
+					let i = self.loops.len().wrapping_sub(levels as usize + 1);
 					let c = self
 						.loops
 						.get_mut(i)
@@ -632,7 +632,12 @@ where
 		Ok(())
 	}
 
-	fn parse_expression_new_reg(&mut self, expr: &Expression<'s>, line: u32, column: u32) -> Result<u16, ByteCodeError<'s>> {
+	fn parse_expression_new_reg(
+		&mut self,
+		expr: Expression<'s>,
+		line: u32,
+		column: u32,
+	) -> Result<u16, ByteCodeError<'s>> {
 		let r = self.alloc_reg(line, column)?;
 		Ok(if let Some(r) = self.parse_expression(Some(r), expr)? {
 			self.dealloc_reg();
@@ -645,7 +650,7 @@ where
 	fn parse_expression(
 		&mut self,
 		store: Option<u16>,
-		expr: &Expression<'s>,
+		expr: Expression<'s>,
 	) -> Result<Option<u16>, ByteCodeError<'s>> {
 		match expr {
 			Expression::Operation {
@@ -655,14 +660,14 @@ where
 				let og_cvc = self.curr_var_count;
 				let (r_left, r_right) = (self.curr_var_count, self.curr_var_count + 1);
 				self.curr_var_count += 2;
-				let or_left = self.parse_expression(Some(r_left), left)?;
+				let or_left = self.parse_expression(Some(r_left), *left)?;
 				let left = if let Some(l) = or_left {
 					self.curr_var_count -= 1;
 					l
 				} else {
 					r_left
 				};
-				let or_right = self.parse_expression(Some(r_right), right)?;
+				let or_right = self.parse_expression(Some(r_right), *right)?;
 				let right = if let Some(r) = or_right {
 					self.curr_var_count -= 1;
 					r
@@ -699,7 +704,7 @@ where
 				let og_cvc = self.curr_var_count;
 				let r_expr = self.curr_var_count;
 				self.curr_var_count += 1;
-				let expr = if let Some(r) = self.parse_expression(Some(r_expr), expr)? {
+				let expr = if let Some(r) = self.parse_expression(Some(r_expr), *expr)? {
 					self.curr_var_count -= 1;
 					r
 				} else {
@@ -713,7 +718,7 @@ where
 				self.curr_var_count = og_cvc;
 				Ok(None)
 			}
-			Expression::Atom { atom, line, column } => match *atom {
+			Expression::Atom { atom, line, column } => match atom {
 				Atom::_Self => {
 					let dest = store.expect("No register to store self in");
 					self.instr.push(Instruction::CopySelf { dest });
@@ -764,8 +769,8 @@ where
 						atom: Atom::Env, ..
 					}) => Obj::Env,
 					Some(expr) => {
-						let r = self.alloc_reg(*line, *column)?;
-						Obj::Some(if let Some(r) = self.parse_expression(Some(r), expr)? {
+						let r = self.alloc_reg(line, column)?;
+						Obj::Some(if let Some(r) = self.parse_expression(Some(r), *expr)? {
 							self.dealloc_reg();
 							r
 						} else {
@@ -785,7 +790,7 @@ where
 				// Parse arguments
 				let mut args = Vec::with_capacity(arguments.len());
 				for a in arguments {
-					let r = self.alloc_reg(*line, *column)?;
+					let r = self.alloc_reg(line, column)?;
 					if let Some(r) = self.parse_expression(Some(r), a)? {
 						self.dealloc_reg();
 						args.push(r);
@@ -798,12 +803,12 @@ where
 					func: self.map_string(name),
 					args: args.into_boxed_slice(),
 				});
-				self.max_call_args = self.max_call_args.max(arguments.len() as u16);
+				self.max_call_args = self.max_call_args.max(ca.args.len() as u16);
 
 				self.instr.push(match expr {
 					Obj::Some(expr) => Instruction::Call(expr, ca),
 					Obj::_Self => {
-						if let Some(&func) = self.methods.get(&name[..]) {
+						if let Some(&func) = self.methods.get(name) {
 							let ca = Box::new(SelfCallArgs {
 								store_in: ca.store_in,
 								func,
@@ -831,7 +836,7 @@ where
 				};
 				self.instr
 					.push(Instruction::NewArray(array_reg, array.len()));
-				for (i, expr) in array.iter().enumerate() {
+				for (i, expr) in array.into_iter().enumerate() {
 					let r = self.curr_var_count;
 					self.curr_var_count += 1;
 					let r = if let Some(e) = self.parse_expression(Some(r), expr)? {
@@ -858,7 +863,7 @@ where
 				};
 				self.instr
 					.push(Instruction::NewDictionary(dict_reg, dictionary.len()));
-				for (key_expr, val_expr) in dictionary.iter() {
+				for (key_expr, val_expr) in dictionary {
 					let (k, v) = (self.curr_var_count, self.curr_var_count + 1);
 					self.curr_var_count += 2;
 					let k = if let Some(e) = self.parse_expression(Some(k), key_expr)? {
@@ -886,7 +891,7 @@ where
 		let key = Constant::from_variant(var).expect("Failed to convert Variant to Constant");
 		match self.const_map.entry(key) {
 			Entry::Vacant(e) => {
-				self.consts.push(e.key().clone().as_variant());
+				self.consts.push(e.key().clone().into_variant());
 				let r = u16::MAX - self.consts.len() as u16 + 1;
 				e.insert(r);
 				r
@@ -899,7 +904,7 @@ where
 		// TODO add a reverse map
 		for (k, &v) in self.const_map.iter() {
 			if v == reg {
-				return Some(k.clone().as_variant());
+				return Some(k.clone().into_variant());
 			}
 		}
 		None
@@ -924,7 +929,7 @@ where
 		self.curr_var_count = self
 			.curr_var_count
 			.checked_add(1)
-			.ok_or(ByteCodeError::new(
+			.ok_or_else(|| ByteCodeError::new(
 				line,
 				column,
 				ByteCodeErrorType::TooManyRegisters(),
@@ -948,7 +953,7 @@ impl Constant {
 				Ok(v) => Self::Int(v),
 				Err(v) => match v.as_real() {
 					Ok(v) => Self::Real(v),
-					Err(_) => match var.as_string() {
+					Err(_) => match var.into_string() {
 						Ok(v) => Self::Str(v),
 						Err(_) => return Err(()),
 					},
@@ -957,7 +962,7 @@ impl Constant {
 		})
 	}
 
-	fn as_variant<V>(self) -> V
+	fn into_variant<V>(self) -> V
 	where
 		V: VariantType,
 	{
@@ -1017,9 +1022,9 @@ impl<'a> ByteCodeError<'a> {
 impl fmt::Display for ByteCodeError<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		use fmt::Write;
-		let mut w = |s, v| {
+		let mut w = |s, v: &str| {
 			f.write_str(s)?;
-			if v != "" {
+			if !v.is_empty() {
 				f.write_str(" '")?;
 				f.write_str(v)?;
 				f.write_char('\'')?;

@@ -218,12 +218,12 @@ impl VariantType for Variant {
 	}
 
 	#[inline]
-	fn as_string(self) -> Result<Rc<str>, Self> {
+	fn into_string(self) -> Result<Rc<str>, Self> {
 		Err(self)
 	}
 
 	#[inline]
-	fn as_object(self) -> Result<ScriptObject<Self>, Self> {
+	fn into_object(self) -> Result<ScriptObject<Self>, Self> {
 		Err(self)
 	}
 
@@ -258,9 +258,9 @@ impl VariantType for Variant {
 			Variant::None => Err(CallError::empty()),
 			&Variant::Integer(i) => {
 				if i < 0 {
-					Ok(Box::new((i + 1..=0).rev().map(|i| Variant::Integer(i))))
+					Ok(Box::new((i + 1..=0).rev().map(Variant::Integer)))
 				} else {
-					Ok(Box::new((0..i).map(|i| Variant::Integer(i))))
+					Ok(Box::new((0..i).map(Variant::Integer)))
 				}
 			}
 			_ => Err(CallError::incompatible_type()),
