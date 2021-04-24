@@ -188,66 +188,22 @@ where
 		}
 
 		let vars_len = self.var_count as usize + self.consts.len();
+		let mut vars = Vec::with_capacity(vars_len);
+		// Extend is terribly slow, hence manual iteration
+		for &a in args.iter() {
+			vars.push(a.clone());
+		}
+		vars.resize_with(self.var_count as usize, || V::default());
+		for c in self.consts.iter() {
+			vars.push(c.clone());
+		}
 
-		// Allocating stuff on the stack is much cheaper. However, blindly
-		// allocating a really big array is actually worse so use Vec for
-		// large functions
-		// (gib VLAs pls (/ °-°)/ )
-		let mut stack_vars = [
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-			mem::MaybeUninit::uninit(),
-		];
-		let mut heap_vars = if vars_len > stack_vars.len() {
-			let mut vars = Vec::with_capacity(vars_len);
-			vars.resize_with(vars_len, || mem::MaybeUninit::uninit());
-			Some(vars)
-		} else {
-			None
-		};
-		let vars = if let Some(v) = heap_vars.as_mut() {
-			&mut v[..]
-		} else {
-			&mut stack_vars[..]
-		};
-
-		// Initializes all elements from 0 to args.len()
-		for (i, v) in args
-			.iter()
-			.copied()
-			.cloned()
-			.map(|v| mem::MaybeUninit::new(v))
-			.enumerate()
-		{
-			vars[i] = v;
-		}
-		// Initializes all elements from args.len() to self.var_count
-		for i in args.len()..self.var_count as usize {
-			vars[i] = mem::MaybeUninit::new(V::default());
-		}
-		// Initializes all elements from self.var_count to (self.var_count + self.consts.len())
-		// vars_len == self.var_count + self.consts.len(), hence this initializes the remaining
-		// elements.
-		for (i, v) in self
-			.consts
-			.iter()
-			.cloned()
-			.map(|v| mem::MaybeUninit::new(v))
-			.enumerate()
-		{
-			vars[i + self.var_count as usize] = v;
-		}
+		// Adding vars_len speeds things up because idk
 		let vars = &mut vars[..vars_len];
-		// SAFETY: all variables are initialized
-		let vars = unsafe { mem::transmute(vars) };
 
-		let mut call_args = Vec::new();
+		let mut call_args = Vec::with_capacity(self.max_call_args as usize);
 		call_args.resize(self.max_call_args as usize, core::ptr::null());
+		// This speeds things up by a lot
 		let call_args = &mut call_args[..];
 
 		let mut state = RunState { vars };
