@@ -13,4 +13,3 @@ unwrap_none = "*"
 [features]
 default = ["std"]
 std = []
-unsafe-loop = []

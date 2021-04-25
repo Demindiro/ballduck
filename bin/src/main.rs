@@ -216,6 +216,15 @@ mod tracer {
 			}
 			println!();
 		}
+
+		fn error(
+			&self,
+			bytecode: &bs::ByteCode<V>,
+			_: &mut bs::RunState<V>,
+			_error: &dyn std::error::Error,
+		) {
+			print!("ERROR  {}", bytecode.name());
+		}
 	}
 
 	impl fmt::Debug for Tracer {

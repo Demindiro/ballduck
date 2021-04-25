@@ -109,29 +109,45 @@ struct IterIntState {
 	stop: isize,
 }
 
-#[cfg(not(feature = "unsafe-loop"))]
+macro_rules! try_break {
+	(box $e:expr) => {
+		match $e {
+			Ok(v) => v,
+			Err(e) => break Err(Box::new(e)),
+		}
+	};
+	($e:expr) => {
+		match $e {
+			Ok(v) => v,
+			Err(e) => break Err(e),
+		}
+	};
+}
+
 macro_rules! reg {
 	(ref $vars:ident $reg:ident) => {
-		$vars.get(*$reg as usize).ok_or_else(err::roob)?
+		if let Some(v) = $vars.get(*$reg as usize) {
+			v
+		} else {
+			break Err(Box::new(err::RegisterOutOfBounds));
+		}
 	};
 	(mut $vars:ident $reg:ident) => {
 		*reg!(ref mut $vars $reg)
 	};
 	(ref mut $vars:ident $reg:expr) => {
-		$vars.get_mut(*$reg as usize).ok_or_else(err::roob)?
+		if let Some(v) = $vars.get_mut(*$reg as usize) {
+			v
+		} else {
+			break Err(Box::new(err::RegisterOutOfBounds));
+		}
 	};
-}
-
-#[cfg(feature = "unsafe-loop")]
-macro_rules! reg {
-	(ref $state:ident $reg:ident) => {
-		unsafe { $state.vars.get_unchecked(*$reg as usize) }
-	};
-	(mut $state:ident $reg:ident) => {
-		*reg!(ref mut $state $reg)
-	};
-	(ref mut $state:ident $reg:expr) => {
-		unsafe { $state.vars.get_unchecked_mut(*$reg as usize) }
+	($life:tt ref $vars:ident $reg:ident) => {
+		if let Some(v) = $vars.get_mut(*$reg as usize) {
+			v
+		} else {
+			break $life Err(Box::new(err::RegisterOutOfBounds));
+		}
 	};
 }
 
@@ -139,18 +155,18 @@ macro_rules! run_op {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
 		{
 			// This allows the compiler to do the 3 registers checks in one go
-			if *$r as usize >= $vars.len() {
-				return Err(err::roob());
+			if unlikely(*$r as usize >= $vars.len()) {
+				break Err(Box::new(err::RegisterOutOfBounds));
 			}
-			reg!(mut $vars $r) = reg!(ref $vars $a).$op(reg!(ref $vars $b))?;
+			reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op(reg!(ref $vars $b)));
 		}
 	};
 	($vars:ident, $r:ident = $a:ident $op:tt) => {
 		{
-			if *$r as usize >= $vars.len() {
-				return Err(err::roob());
+			if unlikely(*$r as usize >= $vars.len()) {
+				break Err(Box::new(err::RegisterOutOfBounds));
 			}
-			reg!(mut $vars $r) = reg!(ref $vars $a).$op()?;
+			reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op());
 		}
 	};
 }
@@ -236,7 +252,7 @@ where
 		// Adding vars_len speeds things up because idk
 		let mut vars = &mut vec_vars[vars_offset..vars_offset_len];
 
-		let ret = loop {
+		let ret = 'lp: loop {
 			if let Some(instr) = self.code.get(ip as usize) {
 				let _trace_instruction = TraceInstruction::new(tracer, self, ip, instr);
 				{
@@ -256,10 +272,10 @@ where
 					) => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
-							return Err(err::arg_oob());
+							break Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!(ref vars a) as *const V;
+							call_args[i] = reg!('lp ref vars a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
 						let ca: &[&V] =
@@ -268,7 +284,10 @@ where
 						// Perform call
 						let obj = reg!(ref vars reg);
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = obj.call(func, ca, env)?;
+						let r = match obj.call(func, ca, env) {
+							Ok(r) => r,
+							Err(e) => break Err(e),
+						};
 						mem::drop(trace_call);
 
 						// Store return value
@@ -283,10 +302,10 @@ where
 					}) => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
-							return Err(err::arg_oob());
+							break Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!(ref vars a) as *const V;
+							call_args[i] = reg!('lp ref vars a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
 						let ca: &[&V] =
@@ -294,7 +313,10 @@ where
 
 						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
-						let r = env.call(func, ca)?;
+						let r = match env.call(func, ca) {
+							Ok(r) => r,
+							Err(e) => break Err(e),
+						};
 						mem::drop(trace_call);
 
 						// Store return value
@@ -308,45 +330,39 @@ where
 						args,
 					} => {
 						// Perform call
-						#[cfg(not(feature = "unsafe-loop"))]
-						let r = functions
+						let r = try_break!(box functions
 							.get(*func as usize)
-							.ok_or(err::UndefinedFunction)?;
-						#[cfg(feature = "unsafe-loop")]
-						let r = unsafe { functions.get_unchecked(*func as usize) };
+							.ok_or(err::UndefinedFunction));
 
 						drop(vars);
 
 						// Resize variable stack
-						let cvo = vars_offset + vars_len;
-						let cvl = cvo + r.var_count as usize;
+						let cvl = vars_offset_len + r.var_count as usize;
 						let cvol = cvl + r.consts.len();
 						// TODO figure out if it's possible to get the compiler to (partially)
 						// inline the resize_with function.
 						if vec_vars.len() < cvol {
-							vec_vars.resize_with(
-								cvol,
-								V::default,
-							);
+							vec_vars.resize_with(cvol, V::default);
 						}
 
 						// Limiting arg_count allows the compiler to optimize out the bounds
 						// checks without risking UB with get_unchecked.
 						debug_assert!((r.param_count as usize) < args.len(), "Too many parameters");
 						let arg_count = r.param_count as usize % args.len();
-						for (i, a) in args.iter().enumerate() {
+						for (i, &a) in args.iter().enumerate() {
 							// Manual break is faster than `take()`
 							if i >= arg_count {
 								break;
 							}
-							vec_vars[cvo + i] = reg!(ref vec_vars a).clone();
+							let a = &(vars_offset + a as usize);
+							vec_vars[vars_offset_len + i] = reg!('lp ref vec_vars a).clone();
 						}
 						for (i, c) in r.consts.iter().enumerate() {
 							vec_vars[cvl + i] = c.clone();
 						}
 
 						let trace_call = TraceSelfCall::new(tracer, self, *func);
-						let r = r.run_loop(
+						let r = try_break!(r.run_loop(
 							object,
 							functions,
 							locals,
@@ -357,7 +373,7 @@ where
 							iterators,
 							iterators_int,
 							call_args,
-						)?;
+						));
 						mem::drop(trace_call);
 
 						vars = &mut vec_vars[vars_offset..vars_offset_len];
@@ -371,7 +387,7 @@ where
 					RetNone => break Ok(V::default()),
 					Iter(reg, iter, jmp_ip) => {
 						let iter = reg!(ref vars iter);
-						let mut iter = iter.iter()?;
+						let mut iter = try_break!(iter.iter());
 						if let Some(e) = iter.next() {
 							reg!(mut vars reg) = e;
 							iterators.push(iter);
@@ -380,21 +396,12 @@ where
 						}
 					}
 					IterJmp(reg, jmp_ip) => {
-						#[cfg(not(feature = "unsafe-loop"))]
-						let iter = iterators.last_mut().ok_or(err::NoIterator)?;
-						#[cfg(feature = "unsafe-loop")]
-						let iter = unsafe {
-							let i = iterators.len() - 1;
-							iterators.get_unchecked_mut(i)
-						};
+						let iter = try_break!(box iterators.last_mut().ok_or(err::NoIterator));
 						if let Some(e) = iter.next() {
 							reg!(mut vars reg) = e;
 							ip = *jmp_ip;
 						} else {
-							#[cfg(not(feature = "unsafe-loop"))]
 							let _ = iterators.pop().unwrap();
-							#[cfg(feature = "unsafe-loop")]
-							let _ = unsafe { iterators.pop().unwrap_unchecked() };
 						}
 					}
 					IterInt {
@@ -404,15 +411,14 @@ where
 						step,
 						jmp_ip,
 					} => {
-						let from = reg!(ref vars from)
-							.as_integer()
-							.map_err(|_| err::IncompatibleType)?;
-						let to = reg!(ref vars to)
-							.as_integer()
-							.map_err(|_| err::IncompatibleType)?;
-						let step = reg!(ref vars step)
-							.as_integer()
-							.map_err(|_| err::IncompatibleType)?;
+						let from = reg!(ref vars from);
+						let to = reg!(ref vars to);
+						let step = reg!(ref vars step);
+						let from = from.as_integer().ok();
+						let to = to.as_integer().ok();
+						let step = step.as_integer().ok();
+						let fts = from.and_then(|f| to.and_then(|t| step.map(|s| (f, t, s))));
+						let (from, to, step) = try_break!(box fts.ok_or(err::IncompatibleType));
 						if from != to {
 							reg!(mut vars reg) = V::new_integer(from);
 							iterators_int.push(IterIntState {
@@ -425,13 +431,7 @@ where
 						}
 					}
 					IterIntJmp(reg, jmp_ip) => {
-						#[cfg(not(feature = "unsafe-loop"))]
-						let iter = iterators_int.last_mut().ok_or(err::NoIterator)?;
-						#[cfg(feature = "unsafe-loop")]
-						let iter = unsafe {
-							let i = iterators_int.len() - 1;
-							iterators_int.get_unchecked_mut(i)
-						};
+						let iter = try_break!(box iterators_int.last_mut().ok_or(err::NoIterator));
 						iter.current += iter.step;
 						// >= is preferred over > so that step == 0 loops forever
 						if (iter.step >= 0 && iter.current < iter.stop)
@@ -440,30 +440,25 @@ where
 							reg!(mut vars reg) = V::new_integer(iter.current);
 							ip = *jmp_ip;
 						} else {
-							#[cfg(not(feature = "unsafe-loop"))]
 							let _ = iterators_int.pop().unwrap();
-							#[cfg(feature = "unsafe-loop")]
-							let _ = unsafe { iterators_int.pop().unwrap_unchecked() };
 						}
 					}
 					JmpIf(reg, jmp_ip) => {
-						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
-							reg!(mut vars reg) = V::new_bool(b);
+						if let Ok(b) = reg!(ref vars reg).as_bool() {
 							if !b {
 								ip = *jmp_ip;
 							}
 						} else {
-							return Err(err::boolean());
+							break Err(Box::new(err::NotBoolean));
 						}
 					}
 					JmpNotIf(reg, jmp_ip) => {
-						if let Ok(b) = mem::take(reg!(ref mut vars reg)).as_bool() {
-							reg!(mut vars reg) = V::new_bool(b);
+						if let Ok(b) = reg!(ref vars reg).as_bool() {
 							if b {
 								ip = *jmp_ip;
 							}
 						} else {
-							return Err(err::boolean());
+							break Err(Box::new(err::NotBoolean));
 						}
 					}
 					Jmp(jmp_ip) => ip = *jmp_ip,
@@ -484,34 +479,49 @@ where
 					Neg(r, a) => run_op!(vars, r = a neg),
 					Not(r, a) => run_op!(vars, r = a not),
 					Store(r, l) => {
-						*locals.get_mut(*l as usize).ok_or_else(err::loob)? =
-							reg!(ref vars r).clone();
+						let l = try_break!(locals
+							.get_mut(*l as usize)
+							.ok_or_else(err::loob));
+						*l = reg!(ref vars r).clone();
 					}
 					Load(r, l) => {
-						reg!(mut vars r) = locals.get(*l as usize).ok_or_else(err::loob)?.clone();
+						let v =
+							try_break!(locals.get(*l as usize).ok_or_else(err::loob));
+						reg!(mut vars r) = v.clone();
 					}
 					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
 					CopySelf { dest } => reg!(mut vars dest) = V::new_object(object.clone()),
 					NewArray(r, c) => {
-						reg!(mut vars r) =
-							V::new_object(ScriptObject(Rc::new(Array::with_len(*c))))
+						reg!(mut vars r) = V::new_object(ScriptObject(Rc::new(Array::with_len(*c))))
 					}
 					NewDictionary(r, c) => {
 						let d = Rc::new(Dictionary::with_capacity(*c));
 						reg!(mut vars r) = V::new_object(ScriptObject(d));
 					}
+					// FIXME using try_break for these last two statements makes everything slower,
+					// presumably because the damn optimizer thinks inserting jmp instructions
+					// everywhere is always a good idea if it means a few bytes less of code.
 					GetIndex(r, o, i) => {
 						reg!(mut vars r) = reg!(ref vars o).index(reg!(ref vars i))?
 					}
 					SetIndex(r, o, i) => {
-						// TODO something funky is going on with this function wrt performance, needs investigation.
 						reg!(ref vars o).set_index(reg!(ref vars i), reg!(ref vars r).clone())?
 					}
 				}
 			} else {
-				break Err(err::ip());
+				break Err(Box::new(err::IpOutOfBounds));
 			}
 		};
+
+		if let Err(err) = ret.as_ref() {
+			// Using slices has a massive performance impact even when no error is thrown,
+			// hence get_unchecked_mut.
+			// SAFETY: A `&mut vec_vars[vars_offset..vars_offset_len]` confirmed before that
+			// this is valid.
+			let vars = unsafe { &mut vec_vars.get_unchecked_mut(vars_offset..vars_offset_len) };
+			let mut state = RunState { vars };
+			tracer.error(self, &mut state, err.as_ref());
+		}
 
 		ret
 	}
@@ -536,8 +546,17 @@ impl Debug for Instruction {
 		use Instruction::*;
 		match self {
 			Call(r, a) => write!(f, "call    {}, {:?}", r, a),
-			//CallSelf(a) => write!(f, "call    self, {:?}", a),
-			CallSelf { .. } => todo!(),
+			CallSelf {
+				store_in,
+				func,
+				args,
+			} => {
+				if let Some(store_in) = store_in {
+					write!(f, "call    self, {}, {}, {:?}", store_in, func, args)
+				} else {
+					write!(f, "call    self, none, {}, {:?}", func, args)
+				}
+			}
 			CallGlobal(a) => write!(f, "call    env, {:?}", a),
 			RetSome(reg) => write!(f, "ret     {}", reg),
 			RetNone => write!(f, "ret     none"),
@@ -671,18 +690,6 @@ pub(super) mod err {
 
 	#[inline(never)]
 	#[cold]
-	pub fn ip() -> E {
-		Box::new(IpOutOfBounds)
-	}
-
-	#[inline(never)]
-	#[cold]
-	pub fn roob() -> E {
-		Box::new(RegisterOutOfBounds)
-	}
-
-	#[inline(never)]
-	#[cold]
 	pub fn arg_count() -> E {
 		Box::new(IncorrectArgumentCount)
 	}
@@ -691,12 +698,6 @@ pub(super) mod err {
 	#[cold]
 	pub fn arg_oob() -> E {
 		Box::new(ArgumentOutOfBounds)
-	}
-
-	#[inline(never)]
-	#[cold]
-	pub fn boolean() -> E {
-		Box::new(NotBoolean)
 	}
 
 	#[inline(never)]

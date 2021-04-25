@@ -5,6 +5,7 @@
 use super::{ByteCode, Instruction, RunState};
 use crate::std_types::Rc;
 use crate::VariantType;
+use std::error::Error;
 
 /// This trait is used to inspect the execution of bytecode. It can trace every
 /// instruction that is being executed & follow calls.
@@ -39,6 +40,9 @@ where
 	/// Called every iteration to allow reading and modifying the [`RunState`](super::RunState)
 	/// It is called right after instruction_pre but before the instruction is actually called.
 	fn peek(&self, bytecode: &ByteCode<V>, state: &mut RunState<V>);
+
+	/// Called whenever an error occurs in the inner loop
+	fn error(&self, bytecode: &ByteCode<V>, state: &mut RunState<V>, error: &dyn Error);
 }
 
 /// Default implementation that does nothing and thus has no performance impact.
@@ -72,6 +76,9 @@ where
 
 	#[inline(always)]
 	fn peek(&self, _: &ByteCode<V>, _: &mut RunState<V>) {}
+
+	#[inline(always)]
+	fn error(&self, _: &ByteCode<V>, _: &mut RunState<V>, _: &dyn Error) {}
 }
 
 /// Starts tracing a run and automatically calls `run_pos` when it is dropped.

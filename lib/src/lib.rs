@@ -8,6 +8,8 @@
 #![feature(core_intrinsics)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(stmt_expr_attributes)]
+#![feature(optimize_attribute)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use unwrap_none::UnwrapNone;

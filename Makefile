@@ -13,7 +13,7 @@ build:
 build-pgo:
 	rm -rf /tmp/pgo-data
 	RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" make test-examples
-	llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+	rust-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
 	RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release
 
 watch-run-%:
