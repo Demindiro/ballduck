@@ -28,7 +28,14 @@ where
 	string_map: &'e mut FxHashSet<Rc<str>>,
 }
 
+enum LoopType {
+	While,
+	ForGeneric,
+	ForInteger,
+}
+
 struct LoopContext {
+	loop_type: LoopType,
 	continues: Vec<u32>,
 	breaks: Vec<u32>,
 }
@@ -176,6 +183,7 @@ where
 					}
 					IterJmp(_, _)
 					| IterIntJmp(_, _)
+					| Break { .. }
 					| Jmp(_)
 					| RetNone
 					| CopySelf { .. }
@@ -287,6 +295,7 @@ where
 
 					// Parse loop block
 					self.loops.push(LoopContext {
+						loop_type: if from_step.is_some() { LoopType::ForInteger } else { LoopType::ForGeneric },
 						continues: Vec::new(),
 						breaks: Vec::new(),
 					});
@@ -321,8 +330,9 @@ where
 
 					// Make `break`s jump to right after the `IterJmp` instruction
 					for i in context.breaks {
+						let ip = self.instr.len() as u32;
 						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Jmp(ic)) => *ic = ip,
+							Some(Instruction::Break { jmp_ip, .. }) => *jmp_ip = ip,
 							_ => unreachable!(),
 						}
 					}
@@ -341,6 +351,7 @@ where
 
 					// Parse loop block
 					self.loops.push(LoopContext {
+						loop_type: LoopType::While,
 						continues: Vec::new(),
 						breaks: Vec::new(),
 					});
@@ -377,8 +388,10 @@ where
 
 					// Make `break`s jump to right after the expression evaluation
 					for i in context.breaks {
+						let ip = self.instr.len() as u32;
 						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Jmp(ic)) => *ic = ip,
+							Some(Instruction::Jmp(jmp_ip)) => *jmp_ip = ip,
+							Some(Instruction::Break { jmp_ip, .. }) => *jmp_ip = ip,
 							_ => unreachable!(),
 						}
 					}
@@ -614,13 +627,28 @@ where
 					line,
 					column,
 				} => {
-					let i = self.loops.len().wrapping_sub(levels as usize + 1);
+					// The AST interprets level as a reverse "loop index", while we interpret it
+					// as "how many loops to pop"
+					let levels = levels as usize + 1;
+					let i = self.loops.len().wrapping_sub(levels);
 					let c = self
 						.loops
 						.get_mut(i)
 						.ok_or_else(err!(lazy line, column, UnexpectedBreak))?;
 					c.breaks.push(self.instr.len() as u32);
-					self.instr.push(Instruction::Jmp(u32::MAX));
+					let (mut amount, mut amount_int) = (0, 0);
+					for l in self.loops.iter().rev().take(levels) {
+						match l.loop_type {
+							LoopType::While => (),
+							LoopType::ForGeneric => amount += 1,
+							LoopType::ForInteger => amount_int += 1,
+						}
+					}
+					self.instr.push(if amount == 0 && amount_int == 0 {
+						Instruction::Jmp(u32::MAX)
+					} else {
+						Instruction::Break { amount, amount_int, jmp_ip: u32::MAX }
+					})
 				}
 			}
 		}

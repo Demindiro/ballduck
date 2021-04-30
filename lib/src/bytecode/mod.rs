@@ -51,6 +51,11 @@ pub enum Instruction {
 		jmp_ip: u32,
 	},
 	IterIntJmp(u16, u32),
+	Break {
+		amount: u8,
+		amount_int: u8,
+		jmp_ip: u32,
+	},
 
 	Add(u16, u16, u16),
 	Sub(u16, u16, u16),
@@ -404,6 +409,19 @@ where
 							let _ = iterators.pop().unwrap();
 						}
 					}
+					Break { amount, amount_int, jmp_ip } => {
+						for _ in 0..*amount {
+							if unlikely(iterators.pop().is_none()) {
+								return Err(Box::new(err::NoIterator));
+							}
+						}
+						for _ in 0..*amount_int {
+							if unlikely(iterators_int.pop().is_none()) {
+								return Err(Box::new(err::NoIterator));
+							}
+						}
+						ip = *jmp_ip;
+					}
 					IterInt {
 						reg,
 						from,
@@ -569,8 +587,9 @@ impl Debug for Instruction {
 				to,
 				step,
 				jmp_ip,
-			} => write!(f, "iterint {}, {}, {}, {}, {}", reg, from, to, step, jmp_ip),
+			} => write!(f, "iteri   {}, {}, {}, {}, {}", reg, from, to, step, jmp_ip),
 			IterIntJmp(r, p) => write!(f, "iterijp {}, {}", r, p),
+			Break { amount, amount_int, jmp_ip } => write!(f, "break   {}, {}, {}", amount, amount_int, jmp_ip),
 
 			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
 			JmpNotIf(r, p) => write!(f, "jmpnif  {}, {}", r, p),
