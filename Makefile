@@ -3,7 +3,7 @@ OUTPUT_DEBUG?=target/debug/bs
 
 .PHONY: test
 
-default: test
+default: build
 
 test-examples: run-array run-dictionary run-fizzbuzz run-iter_str run-sort-selection run-vec2 run-count run-factorial run-hello run-locals run-sieve run-vars run-while
 
@@ -52,3 +52,4 @@ test:
 	$(OUTPUT_DEBUG) $$PWD/test/expression/indices.bs || true
 	$(OUTPUT_DEBUG) $$PWD/test/expression/call_no_assign.bs || true
 	$(OUTPUT_DEBUG) $$PWD/test/constant.bs || true
+	$(OUTPUT_DEBUG) $$PWD/test/loops/nested_break.bs || true

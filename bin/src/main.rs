@@ -22,19 +22,33 @@ pub fn main() {
 	#[cfg(not(feature = "print-instructions"))]
 	let tracer = ();
 
-	let ret = if let Some(file) = args.next() {
+	let mut file = None;
+	let mut dump_bytecode = false;
+	for arg in args {
+		match arg.as_str() {
+			"-S" => dump_bytecode = true,
+			_ => file = Some(arg),
+		}
+	}
+
+	let ret = if let Some(file) = file {
 		match fs::read_to_string(&file) {
 			Ok(source) => match ballscript::parse(&source, &mut string_map, tracer) {
 				Ok(script) => {
-					let script = script.instance();
-					match script.call("main", &[], &env) {
-						Ok(r) => match r {
-							Variant::Integer(i) => i as i32,
-							_ => 0,
-						},
-						Err(e) => {
-							print_call_error(e.as_ref());
-							1
+					if dump_bytecode {
+						println!("{:#?}", script);
+						0
+					} else {
+						let script = script.instance();
+						match script.call("main", &[], &env) {
+							Ok(r) => match r {
+								Variant::Integer(i) => i as i32,
+								_ => 0,
+							},
+							Err(e) => {
+								print_call_error(e.as_ref());
+								1
+							}
 						}
 					}
 				}
@@ -49,7 +63,7 @@ pub fn main() {
 			}
 		}
 	} else {
-		eprintln!("Usage: {} <file>", exec);
+		eprintln!("Usage: {} [-S] <file>", exec);
 		1
 	};
 	process::exit(ret);
