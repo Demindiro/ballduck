@@ -135,7 +135,9 @@ where
 							conv(a);
 						}
 					}
-					CallGlobal(box CallArgs { args, .. }) => {
+					CallEnv {
+						args: box CallArgs { args, .. },
+					} => {
 						for a in args.iter_mut() {
 							conv(a);
 						}
@@ -295,7 +297,11 @@ where
 
 					// Parse loop block
 					self.loops.push(LoopContext {
-						loop_type: if from_step.is_some() { LoopType::ForInteger } else { LoopType::ForGeneric },
+						loop_type: if from_step.is_some() {
+							LoopType::ForInteger
+						} else {
+							LoopType::ForGeneric
+						},
 						continues: Vec::new(),
 						breaks: Vec::new(),
 					});
@@ -647,7 +653,11 @@ where
 					self.instr.push(if amount == 0 && amount_int == 0 {
 						Instruction::Jmp(u32::MAX)
 					} else {
-						Instruction::Break { amount, amount_int, jmp_ip: u32::MAX }
+						Instruction::Break {
+							amount,
+							amount_int,
+							jmp_ip: u32::MAX,
+						}
 					})
 				}
 			}
@@ -848,7 +858,7 @@ where
 							err!(line, column, UndefinedFunction, name);
 						}
 					}
-					Obj::Env => Instruction::CallGlobal(ca),
+					Obj::Env => Instruction::CallEnv { args: ca },
 				});
 				self.min_var_count = self.min_var_count.max(self.curr_var_count);
 				self.curr_var_count = og_cvc;

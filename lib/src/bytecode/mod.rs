@@ -15,7 +15,6 @@ use core::intrinsics::unlikely;
 use core::mem;
 use std::error::Error;
 use tracer::*;
-//use thin::*;
 
 pub struct CallArgs {
 	store_in: Option<u16>,
@@ -33,7 +32,9 @@ pub enum Instruction {
 		func: u16,
 		args: Box<[u16; 16]>,
 	},
-	CallGlobal(Box<CallArgs>),
+	CallEnv {
+		args: Box<CallArgs>,
+	},
 
 	Jmp(u32),
 	JmpIf(u16, u32),
@@ -300,11 +301,13 @@ where
 							reg!(mut vars reg) = r;
 						}
 					}
-					CallGlobal(box CallArgs {
-						store_in,
-						func,
-						args,
-					}) => {
+					CallEnv {
+						args: box CallArgs {
+							store_in,
+							func,
+							args,
+						},
+					} => {
 						// Set arguments
 						if unlikely(call_args.len() < args.len()) {
 							break Err(err::arg_oob());
@@ -409,7 +412,11 @@ where
 							let _ = iterators.pop().unwrap();
 						}
 					}
-					Break { amount, amount_int, jmp_ip } => {
+					Break {
+						amount,
+						amount_int,
+						jmp_ip,
+					} => {
 						for _ in 0..*amount {
 							if unlikely(iterators.pop().is_none()) {
 								return Err(Box::new(err::NoIterator));
@@ -497,14 +504,11 @@ where
 					Neg(r, a) => run_op!(vars, r = a neg),
 					Not(r, a) => run_op!(vars, r = a not),
 					Store(r, l) => {
-						let l = try_break!(locals
-							.get_mut(*l as usize)
-							.ok_or_else(err::loob));
+						let l = try_break!(locals.get_mut(*l as usize).ok_or_else(err::loob));
 						*l = reg!(ref vars r).clone();
 					}
 					Load(r, l) => {
-						let v =
-							try_break!(locals.get(*l as usize).ok_or_else(err::loob));
+						let v = try_break!(locals.get(*l as usize).ok_or_else(err::loob));
 						reg!(mut vars r) = v.clone();
 					}
 					Move(d, s) => reg!(mut vars d) = reg!(ref vars s).clone(),
@@ -570,17 +574,17 @@ impl Debug for Instruction {
 				args,
 			} => {
 				if let Some(store_in) = store_in {
-					write!(f, "call    self, {}, {}, {:?}", store_in, func, args)
+					write!(f, "calls   {}, {}, {:?}", store_in, func, args)
 				} else {
-					write!(f, "call    self, none, {}, {:?}", func, args)
+					write!(f, "calls   none, {}, {:?}", func, args)
 				}
 			}
-			CallGlobal(a) => write!(f, "call    env, {:?}", a),
+			CallEnv { args } => write!(f, "calle   {:?}", args),
 			RetSome(reg) => write!(f, "ret     {}", reg),
 			RetNone => write!(f, "ret     none"),
 
 			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
-			IterJmp(r, p) => write!(f, "iterjmp {}, {}", r, p),
+			IterJmp(r, p) => write!(f, "iterjp  {}, {}", r, p),
 			IterInt {
 				reg,
 				from,
@@ -589,11 +593,15 @@ impl Debug for Instruction {
 				jmp_ip,
 			} => write!(f, "iteri   {}, {}, {}, {}, {}", reg, from, to, step, jmp_ip),
 			IterIntJmp(r, p) => write!(f, "iterijp {}, {}", r, p),
-			Break { amount, amount_int, jmp_ip } => write!(f, "break   {}, {}, {}", amount, amount_int, jmp_ip),
+			Break {
+				amount,
+				amount_int,
+				jmp_ip,
+			} => write!(f, "break   {}, {}, {}", amount, amount_int, jmp_ip),
 
-			JmpIf(r, p) => write!(f, "jmpif   {}, {}", r, p),
-			JmpNotIf(r, p) => write!(f, "jmpnif  {}, {}", r, p),
-			Jmp(p) => write!(f, "jmp     {}", p),
+			JmpIf(r, p) => write!(f, "jpif    {}, {}", r, p),
+			JmpNotIf(r, p) => write!(f, "jpnif   {}, {}", r, p),
+			Jmp(p) => write!(f, "jp      {}", p),
 
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
 			Sub(r, a, b) => write!(f, "sub     {}, {}, {}", r, a, b),

@@ -1,0 +1,7 @@
+fn main()
+	# Should print only "a1"
+	for c in "abcd"
+		for i in 1 to 4
+			env.print(c, i)
+			break
+		break
