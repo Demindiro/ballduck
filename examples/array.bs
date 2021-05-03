@@ -1,16 +1,16 @@
 fn main()
-	env.print("Array construction:")
+	env.println("Array construction:")
 	var arr = [1, 2, 3]
-	env.print("  ", arr)
+	env.println("  ", arr)
 
-	env.print("Setting array index:")
+	env.println("Setting array index:")
 	arr[1] = "duck"
-	env.print("  ", arr)
+	env.println("  ", arr)
 
-	env.print("Iterating arrays:")
+	env.println("Iterating arrays:")
 	for e in arr
-		env.print("  ", e)
+		env.println("  ", e)
 
-	env.print("Using array elements in expressions:")
+	env.println("Using array elements in expressions:")
 	arr = arr[0] + arr[2]
-	env.print("  ", arr)
+	env.println("  ", arr)

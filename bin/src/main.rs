@@ -6,8 +6,7 @@ use ansi_term::Color;
 #[cfg(feature = "copy-variant")]
 use ballscript::specialized::CopyVariant as Variant;
 #[cfg(not(feature = "copy-variant"))]
-use ballscript::Variant;
-use ballscript::{Environment, ParseError};
+use ballscript::{Environment, ParseError, Variant, VariantType};
 use rustc_hash::FxHashSet;
 use std::{env, fs, io, process};
 
@@ -69,17 +68,34 @@ pub fn main() {
 	process::exit(ret);
 }
 
+macro_rules! add_env_fn {
+	($env:ident.$name:ident($args:ident) $code:block) => {
+		$env.add_function(stringify!($name).into(), Box::new(|$args: &[_]| $code))
+			.unwrap();
+	};
+}
+
 fn create_env() -> Environment<Variant> {
 	let mut env = Environment::new();
-	env.add_function(
-		"print".into(),
-		Box::new(|a: &[_]| {
-			a.iter().for_each(|a| print!("{}", a));
-			println!();
-			Ok(Variant::None)
-		}),
-	)
-	.unwrap();
+	add_env_fn!(env.print(args) {
+		use io::Write;
+		args.iter().for_each(|a| print!("{}", a));
+		io::stdout().flush().expect("Failed to flush stdout");
+		Ok(Variant::None)
+	});
+	add_env_fn!(env.println(args) {
+		args.iter().for_each(|a| print!("{}", a));
+		println!();
+		Ok(Variant::None)
+	});
+	add_env_fn!(env.input(args) {
+		use io::Write;
+		args.iter().for_each(|a| print!("{}", a));
+		io::stdout().flush().expect("Failed to flush stdout");
+		let mut out = String::new();
+		io::stdin().read_line(&mut out).expect("Failed to read stdin");
+		Ok(Variant::new_string(out.into()))
+	});
 	env
 }
 

@@ -2,4 +2,4 @@ fn main()
 	var iter = "The quick brown fox jumps over the lazy dog"
 	for c in iter
 		iter = "This won't affect the current iteration"
-		env.print(c)
+		env.println(c)

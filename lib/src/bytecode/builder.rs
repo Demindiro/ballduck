@@ -9,6 +9,7 @@ use crate::std_types::*;
 use crate::tokenizer::{AssignOp, Op};
 use crate::{Rc, VariantType};
 use core::hash;
+use core::ops::Deref;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
@@ -949,8 +950,8 @@ where
 		None
 	}
 
-	fn map_string(&mut self, string: &str) -> Rc<str> {
-		if let Some(string) = self.string_map.get(string) {
+	fn map_string(&mut self, string: impl Into<Rc<str>> + Deref<Target = str>) -> Rc<str> {
+		if let Some(string) = self.string_map.get(&*string) {
 			string.clone()
 		} else {
 			let string: Rc<str> = string.into();

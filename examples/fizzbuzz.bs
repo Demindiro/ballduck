@@ -1,10 +1,10 @@
 fn main()
 	for i in 30
 		if i % 15 == 0
-			env.print("fizzbuzz")
+			env.println("fizzbuzz")
 		elif i % 5 == 0
-			env.print("buzz")
+			env.println("buzz")
 		elif i % 3 == 0
-			env.print("fizz")
+			env.println("fizz")
 		else
-			env.print(i)
+			env.println(i)

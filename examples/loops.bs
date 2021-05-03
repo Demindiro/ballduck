@@ -2,7 +2,7 @@ fn main()
 	for i in 100
 		if i % 2 == 0
 			continue
-		env.print(i)
+		env.println(i)
 		if i > 10
-			env.print("Done")
+			env.println("Done")
 			break

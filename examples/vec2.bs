@@ -1,7 +1,7 @@
 fn main()
 	for _ in 10_000_000
 		self.length_squared(0.5, 0.7)
-	env.print(self.length(0.5, 0.7))
+	env.println(self.length(0.5, 0.7))
 
 
 fn length(x, y)

@@ -4,9 +4,10 @@
 
 #[cfg(not(feature = "std"))]
 use crate::std_types::*;
+use crate::util;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Op {
+pub(crate) enum Op {
 	Add,
 	Sub,
 	Mul,
@@ -31,7 +32,7 @@ pub enum Op {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum AssignOp {
+pub(crate) enum AssignOp {
 	None,
 	Add,
 	Sub,
@@ -43,11 +44,11 @@ pub enum AssignOp {
 	Xor,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Token<'src> {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Token<'src> {
 	Number(&'src str),
 	Name(&'src str),
-	String(&'src str),
+	String(util::Str<'src>),
 	Var,
 	BracketRoundOpen,
 	BracketRoundClose,
@@ -93,16 +94,17 @@ pub enum TokenError {
 	InvalidAssignOp,
 	SpaceInIndent,
 	IndentationOverflow,
+	InvalidEscapeSequence,
 }
 
 #[derive(Debug)]
-pub struct TokenStream<'src> {
+pub(crate) struct TokenStream<'src> {
 	tokens: Vec<(Token<'src>, u32, u32)>,
 	current_index: usize,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum TokenStreamError {
+pub(crate) enum TokenStreamError {
 	TokenError(TokenError),
 }
 
@@ -169,16 +171,100 @@ impl Token<'_> {
 				'}' => Ok((Token::BracketCurlyClose, start + 1)),
 				',' => Ok((Token::Comma, start + 1)),
 				':' => Ok((Token::Colon, start + 1)),
-				'"' => loop {
-					if let Some((i, c)) = chars.next() {
-						if c == '"' {
-							let s = &source[start as usize + 1..i as usize];
-							break Ok((Token::String(s), i + 1));
+				'"' => {
+					let mut start = start as usize + 1;
+					let mut s = String::new();
+					loop {
+						if let Some((i, c)) = chars.next() {
+							if c == '"' {
+								let s = if s.is_empty() {
+									util::Str::Slice(&source[start..i as usize])
+								} else {
+									s.push_str(&source[start..i as usize]);
+									util::Str::Alloc(s.into())
+								};
+								break Ok((Token::String(s), i + 1));
+							} else if c == '\\' {
+								s.push_str(&source[start..i as usize]);
+								start = i as usize + 2;
+								s.push(match chars.next().map(|(_, c)| c) {
+									Some('a') => '\x07',
+									Some('b') => '\x08',
+									Some('e') => '\x1b',
+									Some('f') => '\x0f',
+									Some('n') => '\n',
+									Some('r') => '\r',
+									Some('t') => '\t',
+									Some('v') => '\x0b',
+									Some('\\') => '\\',
+									Some('\'') => '\'',
+									Some('"') => '"',
+									Some(a) if ('0'..='7').contains(&a) => {
+										let a = a.to_digit(8).unwrap();
+										let b = chars
+											.next()
+											.and_then(|(_, c)| c.to_digit(8))
+											.ok_or(TokenError::InvalidEscapeSequence)?;
+										let c = chars
+											.next()
+											.and_then(|(_, c)| c.to_digit(8))
+											.ok_or(TokenError::InvalidEscapeSequence)?;
+										start += 2;
+										let n = a << 6 | b << 3 | c;
+										char::from_u32(n)
+											.ok_or(TokenError::InvalidEscapeSequence)?
+									}
+									Some('x') => {
+										let a = chars
+											.next()
+											.and_then(|(_, c)| c.to_digit(16))
+											.ok_or(TokenError::InvalidEscapeSequence)?;
+										let b = chars
+											.next()
+											.and_then(|(_, c)| c.to_digit(16))
+											.ok_or(TokenError::InvalidEscapeSequence)?;
+										start += 2;
+										let n = a << 4 | b;
+										char::from_u32(n)
+											.ok_or(TokenError::InvalidEscapeSequence)?
+									}
+									Some('u') => {
+										let mut n = 0;
+										for _ in 0..4 {
+											let a = chars
+												.next()
+												.and_then(|(_, c)| c.to_digit(16))
+												.ok_or(TokenError::InvalidEscapeSequence)?;
+											n = (n << 4) | a;
+											start += 1;
+										}
+										char::from_u32(n)
+											.ok_or(TokenError::InvalidEscapeSequence)?
+									}
+									Some('U') => {
+										let mut n = 0;
+										for _ in 0..8 {
+											let (_, a) = chars
+												.next()
+												.ok_or(TokenError::InvalidEscapeSequence)?;
+											let a = a
+												.to_digit(16)
+												.ok_or(TokenError::InvalidEscapeSequence)?;
+											n = (n << 4) | a;
+											start += 1;
+										}
+										char::from_u32(n)
+											.ok_or(TokenError::InvalidEscapeSequence)?
+									}
+									Some(_) => return Err(TokenError::InvalidEscapeSequence),
+									None => return Err(TokenError::UnterminatedString),
+								})
+							}
+						} else {
+							break Err(TokenError::UnterminatedString);
 						}
-					} else {
-						break Err(TokenError::UnterminatedString);
 					}
-				},
+				}
 				_ if Self::OPERATORS.contains(c) => {
 					if let Some(&(i, n)) = chars.peek() {
 						if n == '=' {
@@ -316,7 +402,7 @@ impl Token<'_> {
 }
 
 impl<'src> TokenStream<'src> {
-	pub fn parse(mut source: &'src str) -> Result<Self, TokenStreamError> {
+	pub(crate) fn parse(mut source: &'src str) -> Result<Self, TokenStreamError> {
 		let mut line = 0;
 		let mut column = 0;
 		let mut tokens = Vec::new();
@@ -353,25 +439,25 @@ impl<'src> TokenStream<'src> {
 	}
 
 	/// Returns the next token and advances the iterator
-	pub fn next(&mut self) -> Option<Token<'src>> {
+	pub(crate) fn next(&mut self) -> Option<Token<'src>> {
 		if self.current_index < self.tokens.len() {
 			self.current_index += 1;
-			Some(self.tokens[self.current_index - 1].0)
+			Some(self.tokens[self.current_index - 1].clone().0)
 		} else {
 			None
 		}
 	}
 
 	/// Rewinds the iterator by one token
-	pub fn prev(&mut self) {
+	pub(crate) fn prev(&mut self) {
 		if self.current_index > 0 {
 			self.current_index -= 1;
 		}
 	}
 
 	/// Returns the line and column of the current token
-	pub fn position(&self) -> (u32, u32) {
-		let e = self.tokens[self.current_index - 1];
+	pub(crate) fn position(&self) -> (u32, u32) {
+		let e = &self.tokens[self.current_index - 1];
 		(e.1, e.2)
 	}
 

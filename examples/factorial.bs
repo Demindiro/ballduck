@@ -1,6 +1,6 @@
 fn main()
 	for i in 21
-		env.print(i, " => ", self.factorial(i))
+		env.println(i, " => ", self.factorial(i))
 
 fn factorial(n)
 	if n <= 1

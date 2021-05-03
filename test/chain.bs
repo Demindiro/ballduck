@@ -1,0 +1,6 @@
+fn main()
+	var s = "   aaa\n\n\n"
+	var a = s.rstrip().lstrip()
+	env.println(a)
+	env.println(s.rstrip().lstrip())
+	env.println("abc".strip("a"))

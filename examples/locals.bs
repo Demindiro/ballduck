@@ -1,11 +1,11 @@
 var my_var
 
 fn main()
-	env.print(my_var)
+	env.println(my_var)
 	self.my_var = "chicken"
-	env.print(my_var)
+	env.println(my_var)
 	self.set_my_var()
-	env.print(my_var)
+	env.println(my_var)
 
 fn set_my_var()
 	self.my_var = "dog"

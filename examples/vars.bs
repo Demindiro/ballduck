@@ -5,8 +5,8 @@ fn main()
 	var x = "apple"
 	var y = "pen"
 	var z = x + y
-	env.print(x, " + ", y, " = ", z)
+	env.println(x, " + ", y, " = ", z)
 	z += "apple"
-	env.print(z)
+	env.println(z)
 	self.local_var += z
-	env.print(local_var)
+	env.println(local_var)

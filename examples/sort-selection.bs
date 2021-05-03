@@ -1,7 +1,7 @@
 fn main()
 	var list = [8, 4, 9, 2, 3, 7, 4, 1, 0]
 
-	env.print("Before: ", list)
+	env.println("Before: ", list)
 
 	var len = list.len()
 	len -= 1
@@ -18,4 +18,4 @@ fn main()
 				continue
 				break
 
-	env.print("After: ", list)
+	env.println("After: ", list)

@@ -5,17 +5,20 @@
 #[cfg(not(feature = "std"))]
 use crate::std_types::*;
 use crate::tokenizer::*;
+use crate::util;
 use core::convert::TryInto;
 use core::fmt;
 
 type Integer = isize;
 type Real = f64;
 
+#[derive(Debug)]
 pub(crate) struct Script<'src> {
 	pub functions: Vec<Function<'src>>,
 	pub variables: Vec<&'src str>,
 }
 
+#[derive(Debug)]
 pub(crate) struct Function<'src> {
 	pub name: &'src str,
 	pub parameters: Vec<&'src str>,
@@ -98,7 +101,7 @@ pub(crate) enum Atom<'src> {
 	Name(&'src str),
 	Real(Real),
 	Integer(Integer),
-	String(&'src str),
+	String(util::Str<'src>),
 	Bool(bool),
 	_Self,
 	Env,
@@ -164,6 +167,7 @@ macro_rules! err {
 		return Error::new(ErrorType::$err, l, c);
 	}};
 	(UnexpectedToken, $err_val:expr, $tokens:ident) => {{
+		//panic!("The fuck? {:?}", $err_val);
 		let tk = format!("{:?}", $err_val);
 		let (l, c) = $tokens.position();
 		return Error::new(ErrorType::UnexpectedToken(tk), l, c);
@@ -566,6 +570,10 @@ impl<'src> Expression<'src> {
 			_ => todo(tokens, line!())?,
 		};
 
+		Self::parse_with(lhs, tokens)
+	}
+
+	fn parse_with(lhs: Self, tokens: &mut TokenStream<'src>) -> Result<Self, Error> {
 		if let Some(tk) = tokens.next() {
 			match tk {
 				Token::Op(opl) => match tokens.next() {
@@ -587,14 +595,43 @@ impl<'src> Expression<'src> {
 									return todo(tokens, line!());
 								};
 								let args = Self::parse_expr_list(tokens, Token::BracketRoundClose)?;
+								let tk = tokens.next();
 								match opl {
-									Op::Access => Ok(Self::new_fn(Some(lhs), og_mid, args, tokens)),
-									op => Ok(Self::new_op(
-										lhs,
-										op,
-										Self::new_fn(None, og_mid, args, tokens),
-										tokens,
-									)),
+									Op::Access => {
+										let f = Self::new_fn(Some(lhs), og_mid, args, tokens);
+										match tk {
+											Some(Token::Op(_)) => {
+												tokens.prev();
+												Self::parse_with(f, tokens)
+											}
+											Some(_) => {
+												tokens.prev();
+												Ok(f)
+											}
+											None => Ok(f),
+										}
+									}
+									op => {
+										if let Some(Token::Op(opr)) = tk {
+											Self::parse_tri_op_start(
+												lhs,
+												op,
+												Self::new_fn(None, og_mid, args, tokens),
+												opr,
+												tokens,
+											)
+										} else {
+											if tk.is_some() {
+												tokens.prev();
+											}
+											Ok(Self::new_op(
+												lhs,
+												op,
+												Self::new_fn(None, og_mid, args, tokens),
+												tokens,
+											))
+										}
+									}
 								}
 							}
 							Some(Token::BracketRoundClose)
@@ -692,11 +729,11 @@ impl<'src> Expression<'src> {
 								Some(Token::Op(opr)) => {
 									return Self::parse_tri_op_start(lhs, opl, f, opr, tokens);
 								}
-								None
-								| Some(Token::BracketRoundClose)
-								| Some(Token::BracketSquareClose)
-								| Some(Token::BracketCurlyClose) => return Ok(Self::new_op(lhs, opl, f, tokens)),
-								Some(tk) => err!(UnexpectedToken, tk, tokens),
+								None => return Ok(Self::new_op(lhs, opl, f, tokens)),
+								_ => {
+									tokens.prev();
+									return Ok(Self::new_op(lhs, opl, f, tokens));
+								}
 							}
 						} else {
 							todo(tokens, line!())?
@@ -799,7 +836,7 @@ impl<'src> Expression<'src> {
 		}
 	}
 
-	fn new_str(n: &'src str, tokens: &TokenStream<'src>) -> Self {
+	fn new_str(n: util::Str<'src>, tokens: &TokenStream<'src>) -> Self {
 		let pos = tokens.position();
 		Self::Atom {
 			atom: Atom::String(n),
@@ -935,7 +972,7 @@ impl fmt::Display for Error {
 			ErrorType::UnexpectedIndent(n) => write!(f, "Unexpected indent by {} tabs", n),
 			ErrorType::UnexpectedEOF => f.write_str("Unexpected end of file"),
 			ErrorType::InternalError(line) => {
-				f.write_str("An internal error occured at line ")?;
+				f.write_str("An internal error occured in the AST at line ")?;
 				f.write_str(&line.to_string())?;
 				f.write_str(" (A bug report would be welcome)")
 			}

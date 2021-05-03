@@ -87,6 +87,11 @@ macro_rules! check_arg_count {
 			return Err(CallError::bad_argument_count());
 		}
 	};
+	($args:ident <= $count:expr) => {
+		if $args.len() > $count {
+			return Err(CallError::bad_argument_count());
+		}
+	};
 }
 
 #[macro_export]
@@ -257,6 +262,17 @@ impl PartialOrd<Self> for Variant {
 	}
 }
 
+impl Variant {
+	#[inline]
+	fn as_string(&self) -> Result<&Rc<str>, &Self> {
+		if let Self::String(b) = self {
+			Ok(b)
+		} else {
+			Err(self)
+		}
+	}
+}
+
 impl VariantType for Variant {
 	#[inline]
 	fn new_bool(value: bool) -> Self {
@@ -353,6 +369,42 @@ impl VariantType for Variant {
 				"len" => {
 					check_arg_count!(args, 0);
 					Variant::Integer(s.len() as isize)
+				}
+				"strip" => {
+					check_arg_count!(args <= 2);
+					let lpat = if args.len() == 1 {
+						&args[0].as_string().map_err(|_| CallError::BadArgument)?[..]
+					} else {
+						" \t\n"
+					};
+					let rpat = if args.len() == 2 {
+						&args[1].as_string().map_err(|_| CallError::BadArgument)?[..]
+					} else {
+						lpat
+					};
+					Variant::String(
+						s.trim_start_matches(|c| lpat.contains(c))
+							.trim_end_matches(|c| rpat.contains(c))
+							.into(),
+					)
+				}
+				"rstrip" => {
+					check_arg_count!(args <= 1);
+					let rpat = if args.len() == 1 {
+						&args[0].as_string().map_err(|_| CallError::BadArgument)?[..]
+					} else {
+						" \t\n"
+					};
+					Variant::String(s.trim_end_matches(|c| rpat.contains(c)).into())
+				}
+				"lstrip" => {
+					check_arg_count!(args <= 1);
+					let lpat = if args.len() == 1 {
+						&args[0].as_string().map_err(|_| CallError::BadArgument)?[..]
+					} else {
+						" \t\n"
+					};
+					Variant::String(s.trim_start_matches(|c| lpat.contains(c)).into())
 				}
 				_ => return Err(CallError::undefined_function()),
 			},

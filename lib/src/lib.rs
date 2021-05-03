@@ -20,6 +20,7 @@ mod environment;
 mod script;
 mod tokenizer;
 mod types;
+mod util;
 mod variant;
 
 pub use bytecode::{ByteCode, CallResult, Instruction, RunState, Tracer};

@@ -1,0 +1,5 @@
+fn main()
+	env.println("Tabs:\ttab\ttab")
+	env.println("Bells:\b\b\b")
+	env.println("I will not be visible\rCarriage return      ")
+	env.println("Unicode: \U0001F980")

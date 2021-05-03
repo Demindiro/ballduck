@@ -1,0 +1,3 @@
+fn main()
+	while true
+		env.print("You said: '", env.input("Enter something: ").rstrip(), "'")
