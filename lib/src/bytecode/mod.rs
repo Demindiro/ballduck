@@ -36,26 +36,26 @@ pub enum Instruction {
 		args: Box<CallArgs>,
 	},
 
-	Jmp(u32),
-	JmpIf(u16, u32),
-	JmpNotIf(u16, u32),
+	Jmp(*const Instruction),
+	JmpIf(u16, *const Instruction),
+	JmpNotIf(u16, *const Instruction),
 	RetSome(u16),
 	RetNone,
 
-	Iter(u16, u16, u32),
-	IterJmp(u16, u32),
+	Iter(u16, u16, *const Instruction),
+	IterJmp(u16, *const Instruction),
 	IterInt {
-		reg: u16,
+		reg: u8,
 		from: u16,
 		to: u16,
 		step: u16,
-		jmp_ip: u32,
+		jmp_ip: *const Instruction,
 	},
-	IterIntJmp(u16, u32),
+	IterIntJmp(u16, *const Instruction),
 	Break {
 		amount: u8,
 		amount_int: u8,
-		jmp_ip: u32,
+		jmp_ip: *const Instruction,
 	},
 
 	Add(u16, u16, u16),
@@ -93,7 +93,7 @@ pub struct ByteCode<V>
 where
 	V: VariantType,
 {
-	code: Vec<Instruction>,
+	code: Box<[Instruction]>,
 	param_count: u16,
 	var_count: u16,
 	consts: Vec<V>,
@@ -251,7 +251,7 @@ where
 	{
 		let _trace_run = TraceRun::new(tracer, self);
 
-		let mut ip = 0;
+		let mut curr_instr = self.code.as_ptr();
 
 		let vars_len = self.var_count as usize + self.consts.len();
 		let vars_offset_len = vars_offset + vars_len;
@@ -259,13 +259,15 @@ where
 		let mut vars = &mut vec_vars[vars_offset..vars_offset_len];
 
 		let ret = 'lp: loop {
-			if let Some(instr) = self.code.get(ip as usize) {
-				let _trace_instruction = TraceInstruction::new(tracer, self, ip, instr);
+			let pc = unsafe { curr_instr.offset_from(self.code.as_ptr()) } as u32;
+			let instr = unsafe { curr_instr.as_ref().unwrap_unchecked() };
+			{
+				let _trace_instruction = TraceInstruction::new(tracer, self, pc, instr);
 				{
 					let mut vars = RunState { vars };
 					tracer.peek(self, &mut vars);
 				}
-				ip += 1;
+				curr_instr = unsafe { curr_instr.offset(1) };
 				use Instruction::*;
 				match instr {
 					Call(
@@ -400,14 +402,14 @@ where
 							reg!(mut vars reg) = e;
 							iterators.push(iter);
 						} else {
-							ip = *jmp_ip;
+							curr_instr = *jmp_ip;
 						}
 					}
 					IterJmp(reg, jmp_ip) => {
 						let iter = try_break!(box iterators.last_mut().ok_or(err::NoIterator));
 						if let Some(e) = iter.next() {
 							reg!(mut vars reg) = e;
-							ip = *jmp_ip;
+							curr_instr = *jmp_ip;
 						} else {
 							let _ = iterators.pop().unwrap();
 						}
@@ -427,7 +429,7 @@ where
 								return Err(Box::new(err::NoIterator));
 							}
 						}
-						ip = *jmp_ip;
+						curr_instr = *jmp_ip;
 					}
 					IterInt {
 						reg,
@@ -452,7 +454,7 @@ where
 								step,
 							});
 						} else {
-							ip = *jmp_ip
+							curr_instr = *jmp_ip;
 						}
 					}
 					IterIntJmp(reg, jmp_ip) => {
@@ -463,7 +465,7 @@ where
 							|| (iter.step < 0 && iter.current > iter.stop)
 						{
 							reg!(mut vars reg) = V::new_integer(iter.current);
-							ip = *jmp_ip;
+							curr_instr = *jmp_ip;
 						} else {
 							let _ = iterators_int.pop().unwrap();
 						}
@@ -471,7 +473,7 @@ where
 					JmpIf(reg, jmp_ip) => {
 						if let Ok(b) = reg!(ref vars reg).as_bool() {
 							if !b {
-								ip = *jmp_ip;
+								curr_instr = *jmp_ip;
 							}
 						} else {
 							break Err(Box::new(err::NotBoolean));
@@ -480,13 +482,13 @@ where
 					JmpNotIf(reg, jmp_ip) => {
 						if let Ok(b) = reg!(ref vars reg).as_bool() {
 							if b {
-								ip = *jmp_ip;
+								curr_instr = *jmp_ip;
 							}
 						} else {
 							break Err(Box::new(err::NotBoolean));
 						}
 					}
-					Jmp(jmp_ip) => ip = *jmp_ip,
+					Jmp(jmp_ip) => curr_instr = *jmp_ip,
 					Add(r, a, b) => run_op!(vars, r = a add b),
 					Sub(r, a, b) => run_op!(vars, r = a sub b),
 					Mul(r, a, b) => run_op!(vars, r = a mul b),
@@ -530,8 +532,6 @@ where
 						reg!(ref vars o).set_index(reg!(ref vars i), reg!(ref vars r).clone())?
 					}
 				}
-			} else {
-				break Err(Box::new(err::IpOutOfBounds));
 			}
 		};
 
@@ -583,25 +583,25 @@ impl Debug for Instruction {
 			RetSome(reg) => write!(f, "ret     {}", reg),
 			RetNone => write!(f, "ret     none"),
 
-			Iter(r, i, p) => write!(f, "iter    {}, {}, {}", r, i, p),
-			IterJmp(r, p) => write!(f, "iterjp  {}, {}", r, p),
+			Iter(r, i, p) => write!(f, "iter    {}, {}, {:?}", r, i, p),
+			IterJmp(r, p) => write!(f, "iterjp  {}, {:?}", r, p),
 			IterInt {
 				reg,
 				from,
 				to,
 				step,
 				jmp_ip,
-			} => write!(f, "iteri   {}, {}, {}, {}, {}", reg, from, to, step, jmp_ip),
-			IterIntJmp(r, p) => write!(f, "iterijp {}, {}", r, p),
+			} => write!(f, "iteri   {}, {}, {}, {}, {:?}", reg, from, to, step, jmp_ip),
+			IterIntJmp(r, p) => write!(f, "iterijp {}, {:?}", r, p),
 			Break {
 				amount,
 				amount_int,
 				jmp_ip,
-			} => write!(f, "break   {}, {}, {}", amount, amount_int, jmp_ip),
+			} => write!(f, "break   {}, {}, {:?}", amount, amount_int, jmp_ip),
 
-			JmpIf(r, p) => write!(f, "jpif    {}, {}", r, p),
-			JmpNotIf(r, p) => write!(f, "jpnif   {}, {}", r, p),
-			Jmp(p) => write!(f, "jp      {}", p),
+			JmpIf(r, p) => write!(f, "jpif    {}, {:?}", r, p),
+			JmpNotIf(r, p) => write!(f, "jpnif   {}, {:?}", r, p),
+			Jmp(p) => write!(f, "jp      {:?}", p),
 
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
 			Sub(r, a, b) => write!(f, "sub     {}, {}, {}", r, a, b),

@@ -10,6 +10,8 @@ use crate::tokenizer::{AssignOp, Op};
 use crate::{Rc, VariantType};
 use core::hash;
 use core::ops::Deref;
+use core::ptr;
+use core::convert::TryInto;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
@@ -27,6 +29,7 @@ where
 	loops: Vec<LoopContext>,
 	const_map: FxHashMap<Constant, u16>,
 	string_map: &'e mut FxHashSet<Rc<str>>,
+	jump_indices: Vec<(u32, u32)>,
 }
 
 enum LoopType {
@@ -106,6 +109,7 @@ where
 			loops: Vec::new(),
 			const_map: HashMap::with_hasher(Default::default()),
 			string_map,
+			jump_indices: Vec::new(),
 		};
 		for p in function.parameters {
 			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
@@ -197,8 +201,26 @@ where
 		}
 
 		let name = builder.map_string(function.name);
+
+		let mut code = builder.instr.into_boxed_slice();
+
+		for (instr, jmp) in builder.jump_indices {
+			let code_ptr = code.as_ptr();
+			use Instruction::*;
+			match &mut code[instr as usize] {
+				Jmp(jp) | JmpIf(_, jp) | JmpNotIf(_, jp) | Iter(_, _, jp) | IterJmp(_, jp) | IterInt {
+					jmp_ip: jp, ..
+				} |
+				IterIntJmp(_, jp) |
+				Break {
+					jmp_ip: jp, ..
+				} => *jp = unsafe { code_ptr.offset(jmp as isize) },
+				b => panic!("Not a branching instruction: {}:{}  {:?}", instr, jmp, b)
+			}
+		}
+
 		Ok(ByteCode {
-			code: builder.instr,
+			code,
 			var_count: builder.min_var_count,
 			param_count: builder.param_count,
 			consts: builder.consts,
@@ -283,15 +305,15 @@ where
 					self.vars.insert(var, var_reg).expect_none(var);
 					if let Some((from, step)) = from_step {
 						self.instr.push(Instruction::IterInt {
-							reg: var_reg,
+							reg: var_reg.try_into().expect("TODO"),
 							from,
 							to: iter_reg,
 							step,
-							jmp_ip: u32::MAX,
+							jmp_ip: ptr::null(),
 						});
 					} else {
 						self.instr
-							.push(Instruction::Iter(var_reg, iter_reg, u32::MAX));
+							.push(Instruction::Iter(var_reg, iter_reg, ptr::null()));
 					};
 					let ic = self.instr.len() - 1;
 					let ip = self.instr.len() as u32;
@@ -312,36 +334,26 @@ where
 					// Make `continue`s jump to the `IterJmp` instruction
 					for i in context.continues {
 						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Jmp(ic)) => *ic = ip,
-							_ => unreachable!(),
-						}
+						self.jump_indices.push((i, ip));
 					}
 
 					// Insert `IterJmp` instruction & update the `Iter` with the end address.
-					if from_step.is_none() {
-						self.instr.push(Instruction::IterJmp(var_reg, ip));
-						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(ic) {
-							Some(Instruction::Iter(_, _, ic)) => *ic = ip,
-							_ => unreachable!(),
-						}
-					} else {
-						self.instr.push(Instruction::IterIntJmp(var_reg, ip));
-						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(ic) {
-							Some(Instruction::IterInt { jmp_ip, .. }) => *jmp_ip = ip,
-							_ => unreachable!(),
-						}
+					{
+						let i = self.instr.len() as u32;
+						self.jump_indices.push((i, ip));
 					}
+					if from_step.is_none() {
+						self.instr.push(Instruction::IterJmp(var_reg, ptr::null()));
+					} else {
+						self.instr.push(Instruction::IterIntJmp(var_reg, ptr::null()));
+					}
+					let ip = self.instr.len() as u32;
+					self.jump_indices.push((ic as u32, ip));
 
 					// Make `break`s jump to right after the `IterJmp` instruction
 					for i in context.breaks {
 						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Break { jmp_ip, .. }) => *jmp_ip = ip,
-							_ => unreachable!(),
-						}
+						self.jump_indices.push((i, ip));
 					}
 
 					// Remove loop variable
@@ -354,7 +366,7 @@ where
 
 					// Insert `Jmp` to the expr evaluation
 					let start_ip = self.instr.len();
-					self.instr.push(Instruction::Jmp(u32::MAX));
+					self.instr.push(Instruction::Jmp(ptr::null()));
 
 					// Parse loop block
 					self.loops.push(LoopContext {
@@ -368,18 +380,12 @@ where
 					// Make `continue`s jump to the expression evaluation
 					for i in context.continues {
 						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Jmp(ic)) => *ic = ip,
-							_ => unreachable!(),
-						}
+						self.jump_indices.push((i, ip));
 					}
 
 					// Update start jump
 					let ip = self.instr.len() as u32;
-					match self.instr.get_mut(start_ip) {
-						Some(Instruction::Jmp(ic)) => *ic = ip,
-						_ => unreachable!(),
-					}
+					self.jump_indices.push((start_ip as u32, ip));
 
 					// Parse expression
 					let expr_reg = self.curr_var_count;
@@ -390,17 +396,13 @@ where
 					} else {
 						expr_reg
 					};
-					self.instr
-						.push(Instruction::JmpNotIf(expr_reg, start_ip as u32 + 1));
+					self.jump_indices.push((self.instr.len() as u32, start_ip as u32 + 1));
+					self.instr.push(Instruction::JmpNotIf(expr_reg, ptr::null()));
 
 					// Make `break`s jump to right after the expression evaluation
 					for i in context.breaks {
 						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(i as usize) {
-							Some(Instruction::Jmp(jmp_ip)) => *jmp_ip = ip,
-							Some(Instruction::Break { jmp_ip, .. }) => *jmp_ip = ip,
-							_ => unreachable!(),
-						}
+						self.jump_indices.push((i, ip));
 					}
 
 					self.curr_var_count = og_cvc;
@@ -419,28 +421,22 @@ where
 						self.curr_var_count += 1;
 						self.curr_var_count - 1
 					};
-					self.instr.push(Instruction::JmpIf(expr, u32::MAX));
-					let ic = self.instr.len() - 1;
+					self.instr.push(Instruction::JmpIf(expr, ptr::null()));
+					let ic = self.instr.len() as u32 - 1;
 					self.parse_block(lines)?;
 					// Skip else
 					let skip_else_jmp = else_lines.as_ref().map(|_| {
-						self.instr.push(Instruction::Jmp(u32::MAX));
-						self.instr.len() - 1
+						self.instr.push(Instruction::Jmp(ptr::null()));
+						self.instr.len() as u32 - 1
 					});
 					// Jump to right after `if` block if `expr` evaluates to false
 					let ip = self.instr.len() as u32;
-					match self.instr.get_mut(ic) {
-						Some(Instruction::JmpIf(_, ic)) => *ic = ip,
-						_ => unreachable!(),
-					}
+					self.jump_indices.push((ic, ip));
 					// Else
 					if let Some(else_lines) = else_lines {
 						self.parse_block(else_lines)?;
 						let ip = self.instr.len() as u32;
-						match self.instr.get_mut(skip_else_jmp.unwrap()) {
-							Some(Instruction::Jmp(ic)) => *ic = ip,
-							_ => unreachable!(),
-						}
+						self.jump_indices.push((skip_else_jmp.unwrap(), ip));
 					}
 				}
 				Statement::Return { expr, .. } => {
@@ -627,7 +623,7 @@ where
 						.get_mut(i)
 						.ok_or_else(err!(lazy line, column, UnexpectedContinue))?;
 					c.continues.push(self.instr.len() as u32);
-					self.instr.push(Instruction::Jmp(u32::MAX));
+					self.instr.push(Instruction::Jmp(ptr::null()));
 				}
 				Statement::Break {
 					levels,
@@ -652,12 +648,12 @@ where
 						}
 					}
 					self.instr.push(if amount == 0 && amount_int == 0 {
-						Instruction::Jmp(u32::MAX)
+						Instruction::Jmp(ptr::null())
 					} else {
 						Instruction::Break {
 							amount,
 							amount_int,
-							jmp_ip: u32::MAX,
+							jmp_ip: ptr::null(),
 						}
 					})
 				}
