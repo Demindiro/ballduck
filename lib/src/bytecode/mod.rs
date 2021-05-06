@@ -130,50 +130,49 @@ macro_rules! try_break {
 	};
 }
 
+macro_rules! unchecked_assert {
+	($cond:expr) => {
+		#[cfg(debug_assertions)]
+		assert!($cond);
+		#[cfg(not(debug_assertions))]
+		if !$cond {
+			core::hint::unreachable_unchecked();
+		}
+	};
+	($cond:expr, $msg:expr) => {
+		#[cfg(debug_assertions)]
+		assert!($cond, $msg);
+		#[cfg(not(debug_assertions))]
+		if !$cond {
+			core::hint::unreachable_unchecked();
+		}
+	};
+}
+
 macro_rules! reg {
 	(ref $vars:ident $reg:ident) => {
-		if let Some(v) = $vars.get(*$reg as usize) {
-			v
-		} else {
-			break Err(Box::new(err::RegisterOutOfBounds));
+		{
+			unchecked_assert!((*$reg as usize) < $vars.len());
+			$vars.get_unchecked(*$reg as usize)
 		}
 	};
 	(mut $vars:ident $reg:ident) => {
 		*reg!(ref mut $vars $reg)
 	};
 	(ref mut $vars:ident $reg:expr) => {
-		if let Some(v) = $vars.get_mut(*$reg as usize) {
-			v
-		} else {
-			break Err(Box::new(err::RegisterOutOfBounds));
-		}
-	};
-	($life:tt ref $vars:ident $reg:ident) => {
-		if let Some(v) = $vars.get_mut(*$reg as usize) {
-			v
-		} else {
-			break $life Err(Box::new(err::RegisterOutOfBounds));
+		{
+			unchecked_assert!((*$reg as usize) < $vars.len());
+			$vars.get_unchecked_mut(*$reg as usize)
 		}
 	};
 }
 
 macro_rules! run_op {
 	($vars:ident, $r:ident = $a:ident $op:tt $b:ident) => {
-		{
-			// This allows the compiler to do the 3 registers checks in one go
-			if unlikely(*$r as usize >= $vars.len()) {
-				break Err(Box::new(err::RegisterOutOfBounds));
-			}
-			reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op(reg!(ref $vars $b)));
-		}
+		reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op(reg!(ref $vars $b)));
 	};
 	($vars:ident, $r:ident = $a:ident $op:tt) => {
-		{
-			if unlikely(*$r as usize >= $vars.len()) {
-				break Err(Box::new(err::RegisterOutOfBounds));
-			}
-			reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op());
-		}
+		reg!(mut $vars $r) = try_break!(reg!(ref $vars $a).$op());
 	};
 }
 
@@ -258,16 +257,16 @@ where
 		// Adding vars_len speeds things up because idk
 		let mut vars = &mut vec_vars[vars_offset..vars_offset_len];
 
-		let ret = 'lp: loop {
-			let pc = unsafe { curr_instr.offset_from(self.code.as_ptr()) } as u32;
-			let instr = unsafe { curr_instr.as_ref().unwrap_unchecked() };
-			{
+		let ret = loop {
+			unsafe {
+				let pc = curr_instr.offset_from(self.code.as_ptr()) as u32;
+				let instr = curr_instr.as_ref().unwrap_unchecked();
 				let _trace_instruction = TraceInstruction::new(tracer, self, pc, instr);
 				{
 					let mut vars = RunState { vars };
 					tracer.peek(self, &mut vars);
 				}
-				curr_instr = unsafe { curr_instr.offset(1) };
+				curr_instr = curr_instr.offset(1);
 				use Instruction::*;
 				match instr {
 					Call(
@@ -283,11 +282,10 @@ where
 							break Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!('lp ref vars a) as *const V;
+							call_args[i] = reg!(ref vars a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
-						let ca: &[&V] =
-							unsafe { &*(&call_args[..args.len()] as *const _ as *const _) };
+						let ca: &[&V] = &*(&call_args[..args.len()] as *const _ as *const _);
 
 						// Perform call
 						let obj = reg!(ref vars reg);
@@ -315,11 +313,10 @@ where
 							break Err(err::arg_oob());
 						}
 						for (i, a) in args.iter().enumerate() {
-							call_args[i] = reg!('lp ref vars a) as *const V;
+							call_args[i] = reg!(ref vars a) as *const V;
 						}
 						// SAFETY: All the pointers are valid references.
-						let ca: &[&V] =
-							unsafe { &*(&call_args[..args.len()] as *const _ as *const _) };
+						let ca: &[&V] = &*(&call_args[..args.len()] as *const _ as *const _);
 
 						// Perform call
 						let trace_call = TraceCall::new(tracer, self, func);
@@ -355,17 +352,18 @@ where
 							vec_vars.resize_with(cvol, V::default);
 						}
 
-						// Limiting arg_count allows the compiler to optimize out the bounds
-						// checks without risking UB with get_unchecked.
-						debug_assert!((r.param_count as usize) < args.len(), "Too many parameters");
-						let arg_count = r.param_count as usize % args.len();
+						unchecked_assert!(
+							(r.param_count as usize) < args.len(),
+							"Too many parameters"
+						);
+						let arg_count = r.param_count as usize;
 						for (i, &a) in args.iter().enumerate() {
 							// Manual break is faster than `take()`
 							if i >= arg_count {
 								break;
 							}
 							let a = &(vars_offset + a as usize);
-							vec_vars[vars_offset_len + i] = reg!('lp ref vec_vars a).clone();
+							vec_vars[vars_offset_len + i] = reg!(ref vec_vars a).clone();
 						}
 						for (i, c) in r.consts.iter().enumerate() {
 							vec_vars[cvl + i] = c.clone();
@@ -599,7 +597,15 @@ impl Debug for Instruction {
 				to,
 				step,
 				jmp_ip,
-			} => write!(f, "iteri   {}, {}, {}, {}, {:?}", reg, from, to, step, jp(jmp_ip)),
+			} => write!(
+				f,
+				"iteri   {}, {}, {}, {}, {:?}",
+				reg,
+				from,
+				to,
+				step,
+				jp(jmp_ip)
+			),
 			IterIntJmp(r, p) => write!(f, "iterijp {}, {:?}", r, jp(p)),
 			Break {
 				amount,

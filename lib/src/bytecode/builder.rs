@@ -8,10 +8,10 @@ use crate::std_types::hash_map::Entry;
 use crate::std_types::*;
 use crate::tokenizer::{AssignOp, Op};
 use crate::{Rc, VariantType};
+use core::convert::TryInto;
 use core::hash;
 use core::ops::Deref;
 use core::ptr;
-use core::convert::TryInto;
 use unwrap_none::UnwrapNone;
 
 pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
@@ -208,14 +208,15 @@ where
 			let code_ptr = code.as_ptr();
 			use Instruction::*;
 			match &mut code[instr as usize] {
-				Jmp(jp) | JmpIf(_, jp) | JmpNotIf(_, jp) | Iter(_, _, jp) | IterJmp(_, jp) | IterInt {
-					jmp_ip: jp, ..
-				} |
-				IterIntJmp(_, jp) |
-				Break {
-					jmp_ip: jp, ..
-				} => *jp = unsafe { code_ptr.offset(jmp as isize) },
-				b => panic!("Not a branching instruction: {}:{}  {:?}", instr, jmp, b)
+				Jmp(jp)
+				| JmpIf(_, jp)
+				| JmpNotIf(_, jp)
+				| Iter(_, _, jp)
+				| IterJmp(_, jp)
+				| IterInt { jmp_ip: jp, .. }
+				| IterIntJmp(_, jp)
+				| Break { jmp_ip: jp, .. } => *jp = unsafe { code_ptr.offset(jmp as isize) },
+				b => panic!("Not a branching instruction: {}:{}  {:?}", instr, jmp, b),
 			}
 		}
 
@@ -345,7 +346,8 @@ where
 					if from_step.is_none() {
 						self.instr.push(Instruction::IterJmp(var_reg, ptr::null()));
 					} else {
-						self.instr.push(Instruction::IterIntJmp(var_reg, ptr::null()));
+						self.instr
+							.push(Instruction::IterIntJmp(var_reg, ptr::null()));
 					}
 					let ip = self.instr.len() as u32;
 					self.jump_indices.push((ic as u32, ip));
@@ -396,8 +398,10 @@ where
 					} else {
 						expr_reg
 					};
-					self.jump_indices.push((self.instr.len() as u32, start_ip as u32 + 1));
-					self.instr.push(Instruction::JmpNotIf(expr_reg, ptr::null()));
+					self.jump_indices
+						.push((self.instr.len() as u32, start_ip as u32 + 1));
+					self.instr
+						.push(Instruction::JmpNotIf(expr_reg, ptr::null()));
 
 					// Make `break`s jump to right after the expression evaluation
 					for i in context.breaks {
