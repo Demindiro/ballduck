@@ -26,10 +26,10 @@ where
 	fn call_post(&self, bytecode: &ByteCode<V>, function: &Rc<str>);
 
 	/// Called right before a function call
-	fn call_self_pre(&self, bytecode: &ByteCode<V>, function: u16);
+	fn call_self_pre(&self, bytecode: &ByteCode<V>, function: u8);
 
 	/// Called right after a function call
-	fn call_self_post(&self, bytecode: &ByteCode<V>, function: u16);
+	fn call_self_post(&self, bytecode: &ByteCode<V>, function: u8);
 
 	/// Called at the start of a bytecode run
 	fn run_pre(&self, bytecode: &ByteCode<V>);
@@ -63,10 +63,10 @@ where
 	fn call_post(&self, _: &ByteCode<V>, _: &Rc<str>) {}
 
 	#[inline(always)]
-	fn call_self_pre(&self, _: &ByteCode<V>, _: u16) {}
+	fn call_self_pre(&self, _: &ByteCode<V>, _: u8) {}
 
 	#[inline(always)]
-	fn call_self_post(&self, _: &ByteCode<V>, _: u16) {}
+	fn call_self_post(&self, _: &ByteCode<V>, _: u8) {}
 
 	#[inline(always)]
 	fn run_pre(&self, _: &ByteCode<V>) {}
@@ -163,7 +163,7 @@ where
 {
 	bytecode: &'a ByteCode<V>,
 	tracer: &'a T,
-	function: u16,
+	function: u8,
 }
 
 impl<'a, V, T> TraceSelfCall<'a, V, T>
@@ -172,7 +172,7 @@ where
 	T: Tracer<V>,
 {
 	#[inline(always)]
-	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>, function: u16) -> Self {
+	pub fn new(tracer: &'a T, bytecode: &'a ByteCode<V>, function: u8) -> Self {
 		tracer.call_self_pre(bytecode, function);
 		Self {
 			bytecode,

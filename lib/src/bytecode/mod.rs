@@ -17,76 +17,76 @@ use std::error::Error;
 use tracer::*;
 
 pub struct CallArgs {
-	store_in: Option<u16>,
+	store_in: Option<u8>,
 	func: Rc<str>,
-	args: Box<[u16]>,
+	args: Box<[u8]>,
 }
 
 // Check to ensure the size doesn't go over a certain limit
 const _INSTR_SIZE_CHECK: usize = 16 - mem::size_of::<Instruction>();
 
 pub enum Instruction {
-	Call(u16, Box<CallArgs>),
+	Call(u8, Box<CallArgs>),
 	CallSelf {
-		store_in: Option<u16>,
-		func: u16,
-		args: Box<[u16; 16]>,
+		store_in: Option<u8>,
+		func: u8,
+		args: Box<[u8; 16]>,
 	},
 	CallEnv {
 		args: Box<CallArgs>,
 	},
 
 	Jmp(*const Instruction),
-	JmpIf(u16, *const Instruction),
-	JmpNotIf(u16, *const Instruction),
-	RetSome(u16),
+	JmpIf(u8, *const Instruction),
+	JmpNotIf(u8, *const Instruction),
+	RetSome(u8),
 	RetNone,
 
-	Iter(u16, u16, *const Instruction),
-	IterJmp(u16, *const Instruction),
+	Iter(u8, u8, *const Instruction),
+	IterJmp(u8, *const Instruction),
 	IterInt {
 		reg: u8,
-		from: u16,
-		to: u16,
-		step: u16,
+		from: u8,
+		to: u8,
+		step: u8,
 		jmp_ip: *const Instruction,
 	},
-	IterIntJmp(u16, *const Instruction),
+	IterIntJmp(u8, *const Instruction),
 	Break {
 		amount: u8,
 		amount_int: u8,
 		jmp_ip: *const Instruction,
 	},
 
-	Add(u16, u16, u16),
-	Sub(u16, u16, u16),
-	Mul(u16, u16, u16),
-	Div(u16, u16, u16),
-	Rem(u16, u16, u16),
-	And(u16, u16, u16),
-	Or(u16, u16, u16),
-	Xor(u16, u16, u16),
-	Shl(u16, u16, u16),
-	Shr(u16, u16, u16),
-	Not(u16, u16),
-	Neg(u16, u16),
+	Add(u8, u8, u8),
+	Sub(u8, u8, u8),
+	Mul(u8, u8, u8),
+	Div(u8, u8, u8),
+	Rem(u8, u8, u8),
+	And(u8, u8, u8),
+	Or(u8, u8, u8),
+	Xor(u8, u8, u8),
+	Shl(u8, u8, u8),
+	Shr(u8, u8, u8),
+	Not(u8, u8),
+	Neg(u8, u8),
 
-	LessEq(u16, u16, u16),
-	Less(u16, u16, u16),
-	Neq(u16, u16, u16),
-	Eq(u16, u16, u16),
+	LessEq(u8, u8, u8),
+	Less(u8, u8, u8),
+	Neq(u8, u8, u8),
+	Eq(u8, u8, u8),
 
-	Store(u16, u16),
-	Load(u16, u16),
-	Move(u16, u16),
+	Store(u8, u8),
+	Load(u8, u8),
+	Move(u8, u8),
 	CopySelf {
-		dest: u16,
+		dest: u8,
 	},
 
-	NewArray(u16, usize),
-	NewDictionary(u16, usize),
-	GetIndex(u16, u16, u16),
-	SetIndex(u16, u16, u16),
+	NewArray(u8, usize),
+	NewDictionary(u8, usize),
+	GetIndex(u8, u8, u8),
+	SetIndex(u8, u8, u8),
 }
 
 pub struct ByteCode<V>
@@ -94,8 +94,8 @@ where
 	V: VariantType,
 {
 	code: Box<[Instruction]>,
-	param_count: u16,
-	var_count: u16,
+	param_count: u8,
+	var_count: u8,
 	consts: Vec<V>,
 	name: Rc<str>,
 }
@@ -565,6 +565,14 @@ where
 /// This returns each instruction on oneline instead of 5+ with the default Debug
 impl Debug for Instruction {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let jp = f.precision();
+		let jp = |j: &*const _| {
+			if let Some(jp) = jp {
+				((*j as usize - jp) / mem::size_of::<Instruction>()) as isize
+			} else {
+				-1
+			}
+		};
 		use Instruction::*;
 		match self {
 			Call(r, a) => write!(f, "call    {}, {:?}", r, a),
@@ -583,24 +591,24 @@ impl Debug for Instruction {
 			RetSome(reg) => write!(f, "ret     {}", reg),
 			RetNone => write!(f, "ret     none"),
 
-			Iter(r, i, p) => write!(f, "iter    {}, {}, {:?}", r, i, p),
-			IterJmp(r, p) => write!(f, "iterjp  {}, {:?}", r, p),
+			Iter(r, i, p) => write!(f, "iter    {}, {}, {:?}", r, i, jp(p)),
+			IterJmp(r, p) => write!(f, "iterjp  {}, {:?}", r, jp(p)),
 			IterInt {
 				reg,
 				from,
 				to,
 				step,
 				jmp_ip,
-			} => write!(f, "iteri   {}, {}, {}, {}, {:?}", reg, from, to, step, jmp_ip),
-			IterIntJmp(r, p) => write!(f, "iterijp {}, {:?}", r, p),
+			} => write!(f, "iteri   {}, {}, {}, {}, {:?}", reg, from, to, step, jp(jmp_ip)),
+			IterIntJmp(r, p) => write!(f, "iterijp {}, {:?}", r, jp(p)),
 			Break {
 				amount,
 				amount_int,
 				jmp_ip,
-			} => write!(f, "break   {}, {}, {:?}", amount, amount_int, jmp_ip),
+			} => write!(f, "break   {}, {}, {:?}", amount, amount_int, jp(jmp_ip)),
 
-			JmpIf(r, p) => write!(f, "jpif    {}, {:?}", r, p),
-			JmpNotIf(r, p) => write!(f, "jpnif   {}, {:?}", r, p),
+			JmpIf(r, p) => write!(f, "jpif    {}, {:?}", r, jp(p)),
+			JmpNotIf(r, p) => write!(f, "jpnif   {}, {:?}", r, jp(p)),
 			Jmp(p) => write!(f, "jp      {:?}", p),
 
 			Add(r, a, b) => write!(f, "add     {}, {}, {}", r, a, b),
@@ -659,7 +667,7 @@ where
 		br(f)?;
 		f.write_str("consts:")?;
 		for (i, c) in self.consts.iter().enumerate() {
-			let i = i as u16 + self.var_count;
+			let i = i as u8 + self.var_count;
 			if f.alternate() {
 				write!(f, "\n    {:>3}: {:?}", i, c)?;
 			} else {
@@ -670,9 +678,9 @@ where
 		f.write_str("code:")?;
 		for (i, c) in self.code.iter().enumerate() {
 			if f.alternate() {
-				write!(f, "\n    {:>3}: {:?}", i, c)?;
+				write!(f, "\n    {:>3}: {:.*?}", i, self.code.as_ptr() as usize, c)?;
 			} else {
-				write!(f, "{}: {:?}", i, c)?;
+				write!(f, "{}: {:.*?}", i, self.code.as_ptr() as usize, c)?;
 			}
 		}
 		Ok(())

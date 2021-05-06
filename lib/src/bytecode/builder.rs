@@ -18,16 +18,16 @@ pub(crate) struct ByteCodeBuilder<'e, 's: 'e, V>
 where
 	V: VariantType,
 {
-	methods: &'e FxHashMap<Rc<str>, u16>,
-	locals: &'e FxHashMap<Rc<str>, u16>,
+	methods: &'e FxHashMap<Rc<str>, u8>,
+	locals: &'e FxHashMap<Rc<str>, u8>,
 	instr: Vec<Instruction>,
-	vars: FxHashMap<&'s str, u16>,
+	vars: FxHashMap<&'s str, u8>,
 	consts: Vec<V>,
-	curr_var_count: u16,
-	min_var_count: u16,
-	param_count: u16,
+	curr_var_count: u8,
+	min_var_count: u8,
+	param_count: u8,
 	loops: Vec<LoopContext>,
-	const_map: FxHashMap<Constant, u16>,
+	const_map: FxHashMap<Constant, u8>,
 	string_map: &'e mut FxHashSet<Rc<str>>,
 	jump_indices: Vec<(u32, u32)>,
 }
@@ -93,26 +93,26 @@ where
 {
 	pub(crate) fn parse(
 		function: Function<'s>,
-		methods: &'e FxHashMap<Rc<str>, u16>,
-		locals: &'e FxHashMap<Rc<str>, u16>,
+		methods: &'e FxHashMap<Rc<str>, u8>,
+		locals: &'e FxHashMap<Rc<str>, u8>,
 		string_map: &'e mut FxHashSet<Rc<str>>,
 	) -> Result<ByteCode<V>, ByteCodeError<'s>> {
 		let mut builder = Self {
 			instr: Vec::new(),
 			vars: HashMap::with_hasher(Default::default()),
 			consts: Vec::new(),
-			curr_var_count: function.parameters.len() as u16,
-			min_var_count: function.parameters.len() as u16,
+			curr_var_count: function.parameters.len() as u8,
+			min_var_count: function.parameters.len() as u8,
 			locals,
 			methods,
-			param_count: function.parameters.len() as u16,
+			param_count: function.parameters.len() as u8,
 			loops: Vec::new(),
 			const_map: HashMap::with_hasher(Default::default()),
 			string_map,
 			jump_indices: Vec::new(),
 		};
 		for p in function.parameters {
-			if builder.vars.insert(p, builder.vars.len() as u16).is_some() {
+			if builder.vars.insert(p, builder.vars.len() as u8).is_some() {
 				err!(0, 0, DuplicateParameter, p);
 			}
 		}
@@ -124,13 +124,13 @@ where
 
 		if !builder.consts.is_empty() {
 			// All consts are using the upper-most registers, move them downwards
-			let offset = (u16::MAX - builder.consts.len() as u16).wrapping_add(1);
+			let offset = (u8::MAX - builder.consts.len() as u8).wrapping_add(1);
 			let min_var_count = builder.min_var_count;
 			for i in builder.instr.iter_mut() {
 				use Instruction::*;
-				let conv = |c: &mut u16| {
+				let conv = |c: &mut u8| {
 					if *c >= offset {
-						*c = u16::MAX - *c + min_var_count
+						*c = u8::MAX - *c + min_var_count
 					}
 				};
 				match i {
@@ -659,7 +659,7 @@ where
 				}
 			}
 		}
-		self.min_var_count = self.min_var_count.max(self.vars.len() as u16);
+		self.min_var_count = self.min_var_count.max(self.vars.len() as u8);
 		for fv in frame_vars {
 			self.vars.remove(fv).unwrap();
 		}
@@ -671,7 +671,7 @@ where
 		expr: Expression<'s>,
 		line: u32,
 		column: u32,
-	) -> Result<u16, ByteCodeError<'s>> {
+	) -> Result<u8, ByteCodeError<'s>> {
 		let r = self.alloc_reg(line, column)?;
 		Ok(if let Some(r) = self.parse_expression(Some(r), expr)? {
 			self.dealloc_reg();
@@ -683,9 +683,9 @@ where
 
 	fn parse_expression(
 		&mut self,
-		store: Option<u16>,
+		store: Option<u8>,
 		expr: Expression<'s>,
-	) -> Result<Option<u16>, ByteCodeError<'s>> {
+	) -> Result<Option<u8>, ByteCodeError<'s>> {
 		match expr {
 			Expression::Operation {
 				left, op, right, ..
@@ -790,7 +790,7 @@ where
 				enum Obj {
 					_Self,
 					Env,
-					Some(u16),
+					Some(u8),
 				}
 
 				// Parse expression on which to call the function on
@@ -923,12 +923,12 @@ where
 		}
 	}
 
-	fn add_const(&mut self, var: V) -> u16 {
+	fn add_const(&mut self, var: V) -> u8 {
 		let key = Constant::from_variant(var).expect("Failed to convert Variant to Constant");
 		match self.const_map.entry(key) {
 			Entry::Vacant(e) => {
 				self.consts.push(e.key().clone().into_variant());
-				let r = u16::MAX - self.consts.len() as u16 + 1;
+				let r = u8::MAX - self.consts.len() as u8 + 1;
 				e.insert(r);
 				r
 			}
@@ -936,7 +936,7 @@ where
 		}
 	}
 
-	fn get_const(&self, reg: u16) -> Option<V> {
+	fn get_const(&self, reg: u8) -> Option<V> {
 		// TODO add a reverse map
 		for (k, &v) in self.const_map.iter() {
 			if v == reg {
@@ -960,7 +960,7 @@ where
 		self.min_var_count = self.min_var_count.max(self.curr_var_count);
 	}
 
-	fn alloc_reg(&mut self, line: u32, column: u32) -> Result<u16, ByteCodeError<'s>> {
+	fn alloc_reg(&mut self, line: u32, column: u32) -> Result<u8, ByteCodeError<'s>> {
 		let r = self.curr_var_count;
 		self.curr_var_count = self.curr_var_count.checked_add(1).ok_or_else(|| {
 			ByteCodeError::new(line, column, ByteCodeErrorType::TooManyRegisters())

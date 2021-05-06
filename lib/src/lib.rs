@@ -120,7 +120,7 @@ where
 		let locals = ast.variables;
 		let mut hm = FxHashMap::with_capacity_and_hasher(locals.len(), Default::default());
 		for (i, l) in locals.iter().enumerate() {
-			if hm.insert(l.to_string().into(), i as u16).is_some() {
+			if hm.insert(l.to_string().into(), i as u8).is_some() {
 				return Err(ParseError::new(
 					source,
 					0,
@@ -136,7 +136,7 @@ where
 	let mut script = Script::new(locals, tracer);
 
 	for (i, f) in ast.functions.iter().enumerate() {
-		let i = i as u16;
+		let i = i as u8;
 		let name = f.name.into();
 		script
 			.function_map

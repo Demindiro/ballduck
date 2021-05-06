@@ -47,8 +47,8 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	pub(crate) function_map: FxHashMap<Rc<str>, u16>,
-	pub(crate) locals: FxHashMap<Rc<str>, u16>,
+	pub(crate) function_map: FxHashMap<Rc<str>, u8>,
+	pub(crate) locals: FxHashMap<Rc<str>, u8>,
 	pub(crate) functions: Vec<ByteCode<V>>,
 	tracer: T,
 }
@@ -154,7 +154,7 @@ where
 	V: VariantType,
 	T: Tracer<V>,
 {
-	pub(crate) fn new(locals: FxHashMap<Rc<str>, u16>, tracer: T) -> Self {
+	pub(crate) fn new(locals: FxHashMap<Rc<str>, u8>, tracer: T) -> Self {
 		Self {
 			function_map: FxHashMap::with_hasher(Default::default()),
 			functions: Vec::new(),

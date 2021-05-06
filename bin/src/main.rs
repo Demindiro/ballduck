@@ -167,7 +167,7 @@ mod tracer {
 	use std::rc::Rc;
 
 	struct TracerData {
-		show_vars: [u16; 3],
+		show_vars: [u8; 3],
 		show_vars_count: u8,
 	}
 
@@ -219,11 +219,11 @@ mod tracer {
 			println!("[{}] Exited {}", bytecode.name(), function);
 		}
 
-		fn call_self_pre(&self, bytecode: &bs::ByteCode<V>, function: u16) {
+		fn call_self_pre(&self, bytecode: &bs::ByteCode<V>, function: u8) {
 			println!("[{}] Entering {}", bytecode.name(), function);
 		}
 
-		fn call_self_post(&self, bytecode: &bs::ByteCode<V>, function: u16) {
+		fn call_self_post(&self, bytecode: &bs::ByteCode<V>, function: u8) {
 			println!("[{}] Exited {}", bytecode.name(), function);
 		}
 
