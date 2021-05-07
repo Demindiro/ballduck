@@ -205,6 +205,7 @@ where
 		let mut code = builder.instr.into_boxed_slice();
 
 		for (instr, jmp) in builder.jump_indices {
+			assert!((jmp as usize) < code.len(), "Jump index out of bounds");
 			let code_ptr = code.as_ptr();
 			use Instruction::*;
 			match &mut code[instr as usize] {
